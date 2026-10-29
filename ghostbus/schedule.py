@@ -15,6 +15,7 @@ import zipfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from . import config as C
@@ -110,6 +111,10 @@ def day_schedule(day: date, src: Path = CITY_GTFS) -> tuple[pd.DataFrame, pd.Dat
     trips = pd.read_csv(src / "trips.csv", dtype=str, keep_default_na=False)
     trips = trips[trips.service_id.isin(services)]
     routes = pd.read_csv(src / "routes.csv", dtype=str, keep_default_na=False)
+    # Trams and light rail aren't in the bus location feed, so they can't be judged.
+    if "route_type" in routes:
+        rail = set(routes.loc[routes.route_type.isin(["0", "1", "2", "900", "901", "902", "905", "906"]), "route_id"])
+        trips = trips[~trips.route_id.isin(rail)]
     agency = pd.read_csv(src / "agency.csv", dtype=str, keep_default_na=False)
     stops = pd.read_csv(src / "stops.csv", dtype={"stop_id": str})
     st = pd.read_csv(src / "stop_times.csv.gz", dtype={"trip_id": str, "stop_id": str})
@@ -141,7 +146,16 @@ def write_day(day: date) -> Path:
     out = C.SCHEDULE / day.isoformat()
     out.mkdir(parents=True, exist_ok=True)
     trips.to_csv(out / "trips.csv.gz", index=False)
-    st[["trip_id", "stop_sequence", "stop_id", "secs", "stop_lat", "stop_lon"]].to_csv(out / "stop_times.csv.gz", index=False)
+    # Keep only the stops the matcher samples (first, last and evenly spaced between).
+    st = st.sort_values(["trip_id", "stop_sequence"]).reset_index(drop=True)
+    pos = st.groupby("trip_id").cumcount().to_numpy()
+    size = st.groupby("trip_id").trip_id.transform("size").to_numpy()
+    keep = size <= C.SAMPLE_STOPS
+    for n in np.unique(size[~keep]):            # same rule as match._sample
+        picks = np.unique(np.linspace(0, n - 1, C.SAMPLE_STOPS).round().astype(int))
+        keep |= (size == n) & np.isin(pos, picks)
+    smp = st[keep]
+    smp[["trip_id", "stop_sequence", "stop_id", "secs", "stop_lat", "stop_lon"]].to_csv(out / "stop_times.csv.gz", index=False)
     return out
 
 
