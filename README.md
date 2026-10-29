@@ -4,9 +4,29 @@
 
 **Live site:** https://mohammed-890.github.io/ghost-bus/
 
+![Ghost Bus Detector](docs/social.png)
+
 A "ghost bus" is on the timetable and often on the arrival board, but never comes. People wait in the cold, miss work and appointments, and nobody publishes how often it happens. Every bus in England reports its GPS position to the [Bus Open Data Service](https://www.bus-data.dft.gov.uk/) (BODS), and every operator publishes its timetable there. Put the two side by side for long enough, and the ghosts show up.
 
+## What it looks like
+
+> These screenshots use **simulated data** to show the design (it says so on each image). The live site only ever shows real results, and real screenshots replace these once collection has run.
+
+| Home | On a phone |
+|---|---|
+| ![Home page](docs/img/preview-home.png) | <img src="docs/img/preview-phone.png" width="260" alt="Phone view of a route"> |
+
+**Check your bus:** every timetabled departure on a route, and how often a bus actually ran it. Dashed purple departures miss 3 in 10 times or more.
+
+![Route view](docs/img/preview-route.png)
+
+**Least reliable routes and recent ghost buses**
+
+![League table](docs/img/preview-league.png)
+
 ## How it works
+
+![How it works](docs/img/how-it-works.png)
 
 ```
 BODS timetable (GTFS, weekly) ──► every trip scheduled in the city today
