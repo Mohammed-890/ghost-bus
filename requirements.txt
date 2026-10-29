@@ -1,0 +1,6 @@
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.5
+gtfs-realtime-bindings>=1.0.0
+protobuf>=4.25
+pytest>=8

@@ -1,0 +1,58 @@
+# Records live bus positions for Sheffield, back to back, around the clock.
+# Each run polls for 45 minutes; a new run is queued every 15 minutes, so the
+# next one starts as soon as the last finishes. Every poll (and every failure)
+# is saved, so gaps are known and never counted as ghost buses.
+name: collect
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+concurrency:
+  group: collect
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Check the API key is set
+        id: key
+        run: |
+          if [ -z "${{ secrets.BODS_API_KEY }}" ]; then
+            echo "::notice::Add the BODS_API_KEY secret to start collecting (see README)."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.ok == 'true'
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.ok == 'true'
+        with:
+          ref: data
+          path: store
+      - uses: actions/setup-python@v5
+        if: steps.key.outputs.ok == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+      - if: steps.key.outputs.ok == 'true'
+        run: pip install -q -r requirements.txt
+      - name: Poll the live feed
+        if: steps.key.outputs.ok == 'true'
+        run: python -m ghostbus.collect --minutes 45
+        env:
+          BODS_API_KEY: ${{ secrets.BODS_API_KEY }}
+          GHOSTBUS_DATA: store
+      - name: Save
+        if: always() && steps.key.outputs.ok == 'true'
+        working-directory: store
+        run: |
+          git config user.name "ghost-bus-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -qm "pings $(date -u +%Y-%m-%dT%H:%MZ)" || exit 0
+          for i in 1 2 3 4 5; do git pull -q --rebase && git push -q && exit 0; sleep $((i*5)); done
+          exit 1

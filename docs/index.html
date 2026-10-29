@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ghost Bus Detector – Sheffield</title>
+  <meta name="description" content="Which timetabled buses in Sheffield never actually turn up? Measured from the government's live bus location feed, trip by trip.">
+  <meta property="og:title" content="Ghost Bus Detector – Sheffield">
+  <meta property="og:description" content="Timetabled buses that never turn up, measured from live bus GPS, trip by trip.">
+  <meta property="og:image" content="https://mohammed-890.github.io/ghost-bus/social.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23131A22'/%3E%3Crect x='14' y='14' width='36' height='32' rx='6' fill='none' stroke='%23B9A6F0' stroke-width='5' stroke-dasharray='7 5'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="wrap bar-in">
+      <a class="brand" href="./"><span class="mark" aria-hidden="true"></span>Ghost Bus Detector</a>
+      <p class="status" id="status">Loading…</p>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero wrap">
+      <p class="place">Sheffield</p>
+      <h1 id="headline">Some buses on the timetable never come.</h1>
+      <p class="sub" id="subline">This site counts them, trip by trip, from the government’s live bus location feed.</p>
+      <div class="board" id="board" aria-hidden="true"></div>
+    </section>
+
+    <section class="wrap block" id="check">
+      <h2>Check your bus</h2>
+      <p class="hint">Every timetabled departure, and how often a bus actually ran it.</p>
+      <label class="pick">
+        <span>Route</span>
+        <select id="route-select"><option value="">Choose a route</option></select>
+      </label>
+      <div id="route-view" class="route-view" hidden></div>
+      <p class="empty" id="route-empty" hidden></p>
+    </section>
+
+    <section class="wrap block split">
+      <div>
+        <h2>Least reliable routes</h2>
+        <p class="hint">Share of judged trips that never ran. Routes with fewer than 50 judged trips are left out.</p>
+        <ol class="league" id="league"></ol>
+      </div>
+      <div>
+        <h2>Recent ghost buses</h2>
+        <p class="hint">Scheduled, not seen anywhere on the route.</p>
+        <ul class="recent" id="recent"></ul>
+      </div>
+    </section>
+
+    <section class="block map-block">
+      <div class="wrap">
+        <h2>Where it happens</h2>
+        <p class="hint">Each line is a route, darker means more ghost buses.</p>
+      </div>
+      <div id="map" class="map" role="img" aria-label="Map of Sheffield bus routes coloured by ghost bus rate"></div>
+    </section>
+
+    <section class="wrap block" id="method">
+      <h2>How a bus becomes a ghost</h2>
+      <ol class="steps">
+        <li><strong>The timetable.</strong> Every trip operators have registered with the Bus Open Data Service for the day.</li>
+        <li><strong>The buses.</strong> Every bus in England reports its position to the same service. We record Sheffield’s every minute, around the clock.</li>
+        <li><strong>Matching.</strong> A trip <em>ran</em> if a bus reported that exact trip, or if a bus with no trip ID passed the trip’s stops in order, on time. One bus can’t run two trips at once.</li>
+        <li><strong>Fairness.</strong> A trip is only called a <em>ghost</em> if the feed was answering for the whole trip and the operator was visibly reporting its other buses at the time. Otherwise it is <em>not judged</em>, never counted against anyone.</li>
+      </ol>
+      <div class="facts" id="facts"></div>
+      <h3>Can it predict tomorrow?</h3>
+      <div id="model"></div>
+      <p class="small">“Ghost” means no bus was seen. Causes include cancellations, driver shortages and buses whose tracker was off. The data is published under the Open Government Licence. Not affiliated with any operator or the Department for Transport. <a href="https://github.com/Mohammed-890/ghost-bus">Code, raw data and method</a>.</p>
+    </section>
+  </main>
+
+  <footer class="foot wrap">
+    <p>Built by <a href="https://www.linkedin.com/in/mohammed-banabilh-6340553b0/">Mohammed Banabilh</a>. Contains public sector information licensed under the Open Government Licence v3.0.</p>
+  </footer>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="js/app.js" type="module"></script>
+</body>
+</html>
