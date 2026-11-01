@@ -94,7 +94,7 @@ jobs:
           TRIVY_JAVA_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-java-db:1,ghcr.io/aquasecurity/trivy-java-db:1
         run: |
           set +e
-          V=0.56.2
+          V=0.76.1
           curl -sSfL -o trivy.tgz https://github.com/aquasecurity/trivy/releases/download/v$V/trivy_${V}_Linux-64bit.tar.gz \
             || { echo "::error title=trivy::could not download trivy $V"; exit 1; }
           tar xzf trivy.tgz trivy && sudo mv trivy /usr/local/bin/ && trivy --version | head -1
