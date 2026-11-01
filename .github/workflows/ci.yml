@@ -93,9 +93,16 @@ jobs:
           TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db:2,ghcr.io/aquasecurity/trivy-db:2
           TRIVY_JAVA_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-java-db:1,ghcr.io/aquasecurity/trivy-java-db:1
         run: |
-          curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v0.56.2
-          if ! trivy image --quiet --severity CRITICAL,HIGH --ignore-unfixed --format json --output trivy.json ghost-bus:ci 2> trivy.err; then
-            tail -5 trivy.err | while read -r l; do echo "::error title=trivy::$l"; done
+          set +e
+          V=0.56.2
+          curl -sSfL -o trivy.tgz https://github.com/aquasecurity/trivy/releases/download/v$V/trivy_${V}_Linux-64bit.tar.gz \
+            || { echo "::error title=trivy::could not download trivy $V"; exit 1; }
+          tar xzf trivy.tgz trivy && sudo mv trivy /usr/local/bin/ && trivy --version | head -1
+          trivy image --severity CRITICAL,HIGH --ignore-unfixed --scanners vuln --format json --output trivy.json ghost-bus:ci 2> trivy.err
+          rc=$?
+          if [ $rc -ne 0 ] || [ ! -s trivy.json ]; then
+            grep -v '^\s*$' trivy.err | tail -6 | while read -r l; do echo "::error title=trivy::${l:0:300}"; done
+            echo "::error title=trivy::scan exited $rc"
             exit 1
           fi
       - name: Fail on fixable critical issues (and list them)
