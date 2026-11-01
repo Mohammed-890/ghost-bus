@@ -88,14 +88,16 @@ jobs:
           echo "::notice title=image::app image $(docker image inspect ghost-bus:ci --format '{{.Size}}' | awk '{printf "%.0f MB", $1/1e6}'), runs as user $(docker image inspect ghost-bus:ci --format '{{.Config.User}}')"
           test "$(docker image inspect ghost-bus:ci --format '{{.Config.User}}')" = "10001"
       - name: Vulnerability scan
-        uses: aquasecurity/trivy-action@v0.33.1
-        with:
-          image-ref: ghost-bus:ci
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          format: json
-          output: trivy.json
-          exit-code: "0"
+        env:
+          # mirrors avoid the rate limits on the default database registry
+          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db:2,ghcr.io/aquasecurity/trivy-db:2
+          TRIVY_JAVA_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-java-db:1,ghcr.io/aquasecurity/trivy-java-db:1
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v0.56.2
+          if ! trivy image --quiet --severity CRITICAL,HIGH --ignore-unfixed --format json --output trivy.json ghost-bus:ci 2> trivy.err; then
+            tail -5 trivy.err | while read -r l; do echo "::error title=trivy::$l"; done
+            exit 1
+          fi
       - name: Fail on fixable critical issues (and list them)
         run: |
           python3 - <<'PY'
