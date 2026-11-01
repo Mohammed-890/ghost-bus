@@ -67,7 +67,7 @@ Collection started in late October 2026. The site shows real numbers only, and s
 
 ```bash
 pip install -r requirements.txt
-python -m pytest -q                      # synthetic days covering every verdict rule
+python -m pytest -q                      # 26 tests: verdict rules, features, gate, drift, API
 export BODS_API_KEY=...                  # free: https://data.bus-data.dft.gov.uk/account/signup/
 python -m ghostbus.schedule refresh      # timetable
 python -m ghostbus.collect --minutes 10  # live positions
@@ -75,6 +75,80 @@ python -m ghostbus.daily                 # judge finished days, build docs/data
 ```
 
 In this repository the raw data, timetables and daily verdicts live on the [`data` branch](../../tree/data).
+
+## Running it in production (MLOps)
+
+The research pipeline above runs on GitHub Actions. The same code also runs as a small production system: a model registry with a promotion gate, a prediction API, Kubernetes, GitOps deploys, monitoring and automatic retraining.
+
+```mermaid
+flowchart LR
+  subgraph k8s[Kubernetes namespace ghost-bus]
+    C[collector<br/>Deployment] -->|raw polls| PVC[(data PVC)]
+    D[daily CronJob<br/>judge, score, drift, retrain] --> PVC
+    D -->|register + champion alias| M[MLflow<br/>tracking + registry]
+    API[prediction API<br/>FastAPI, 2 replicas] -->|loads champion| M
+    D -->|batch metrics| PG[Pushgateway]
+  end
+  P[Prometheus + Grafana<br/>alerts] -->|scrape| API
+  P -->|scrape| PG
+  GH[GitHub Actions CI] -->|images| GHCR[(GHCR)]
+  GH -->|bump image tag in Git| G[deploy/values-prod.yaml]
+  A[Argo CD] -->|watches| G
+  A -->|syncs| k8s
+```
+
+| Piece | Where | What it does |
+|---|---|---|
+| Shared features | `ghostbus/features.py` | One function builds features for training **and** serving, so the two can't drift apart. History features only ever use days before the one being predicted. |
+| Registry | `ghostbus/registry.py` | MLflow model `ghost-bus-runs` with a `champion` alias (or a local folder registry when no MLflow server is set). Every version keeps its params, test metrics, decision and drift reference. |
+| Champion gate | `ghostbus/train.py` | A retrain is triggered by: no champion, the champion being 7 days old, drift (any feature PSI > 0.2), or live Brier 25% worse than at test time. The challenger only goes live if it beats the champion **on the same unseen days** (after the champion's last training day). Otherwise it is registered as rejected, with the reason. |
+| Monitoring | `ghostbus/monitor.py`, `ghostbus/drift.py` | Every day the champion's predictions for tomorrow are stored, then scored once that day has been judged. Drift is PSI per feature against the champion's training data. |
+| API | `ghostbus/serve.py` | `GET /predict?route=52&time=08:00` → chance it runs. `/healthz`, `/readyz` (model loaded), `/model`, `/routes`, `/metrics`. Picks up a newly promoted champion without a restart. |
+| Images | `Dockerfile`, `docker/mlflow/` | Multi-stage, non-root (uid 10001), 187 MB. Scanned with Trivy in CI. |
+| Helm chart | `chart/ghost-bus` | API (2 replicas, probes, PodDisruptionBudget, graceful shutdown), MLflow, daily CronJob, collector, Pushgateway, ServiceMonitor, alert rules and a Grafana dashboard. |
+| Infrastructure | `terraform/` | A kind cluster, the monitoring stack, the BODS secret, and either the chart or Argo CD. |
+| CI/CD | `.github/workflows/ci.yml` | Lint + tests → chart lint + schema check → Terraform validate → build + scan → **end-to-end on a real Kubernetes cluster** → publish to GHCR → bump the tag Argo CD deploys. |
+
+### What the end-to-end test proves
+
+Every push installs the chart on a fresh kind cluster, seeds a model, and checks:
+
+- the API becomes ready only once it has loaded the champion from MLflow
+- predictions make sense: the demo route 52 (built to fail often 07:00–09:00) gets **0.68 at 08:00 vs 0.97 at 12:00**
+- unknown routes return 404 and `/metrics` is served
+- **no dropped requests during a pod failure**: 300 requests while one API pod is deleted, **300 ok, 0 failed**
+
+The model in that test is trained on **synthetic** data (`ghostbus/demo.py`), because the real data is still being collected. The model's real accuracy will be reported here once there are enough judged days. Until then, the only claim made is that the system works, not how accurate the model is.
+
+### Run it yourself
+
+```bash
+# 1. Docker Compose: MLflow + API, with a demo model from synthetic data
+docker compose up -d mlflow api
+docker compose run --rm demo
+curl "localhost:8000/predict?route=52&time=08:00"     # MLflow UI on localhost:5000
+
+# 2. Kubernetes (kind) with Helm, the same way CI does it
+kind create cluster --name ghost-bus --config deploy/kind/kind-config.yaml
+docker build -t ghost-bus:ci . && docker build -t ghost-bus-mlflow:ci docker/mlflow
+kind load docker-image ghost-bus:ci ghost-bus-mlflow:ci --name ghost-bus
+scripts/e2e.sh
+
+# 3. Terraform: cluster, Prometheus/Grafana and the app (or Argo CD with -var install_argocd=true)
+cd terraform && terraform init && terraform apply -var bods_api_key=$BODS_API_KEY
+```
+
+With Argo CD, nobody runs `kubectl apply`: CI writes the new image tag to `deploy/values-prod.yaml`, and Argo CD rolls it out (`deploy/argocd/application.yaml`).
+
+### What broke while building it
+
+- **MLflow kept getting OOMKilled** in Kubernetes at 1 GiB. MLflow 3 starts about eight background job workers (around 250 MB each) for GenAI evaluation. Turning those off and running one web worker brought it to about 550 MB.
+- **The first tuned model lost to a simple baseline.** It did worse than "this departure's own past rate" on 15 out of 15 time splits. A shallower, more regularised model beat both baselines on 15 out of 15.
+- **Drift detection missed a real shift.** Quantile-binned PSI can't see a change in a feature with only a few values, like hour of day. Features with 30 or fewer distinct values now use PSI by value.
+- **A champion "beat" a challenger on days it had trained on.** The gate now only compares the two on days after the champion's last training day.
+- **The vulnerability scanner couldn't be installed.** Older Trivy releases had been removed upstream, so CI now pins a current release and fails only on fixable critical issues.
+
+Design decisions and their trade-offs are in [`docs/adr/`](docs/adr/).
 
 ## Data licence
 
