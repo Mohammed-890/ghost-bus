@@ -7,7 +7,6 @@ seconds after midnight of the service day.
 """
 from __future__ import annotations
 
-import io
 import shutil
 import sys
 import urllib.request

@@ -1,0 +1,5 @@
+# Prediction API, metrics and the MLflow client (talks to the MLflow server over HTTP)
+fastapi>=0.115
+uvicorn[standard]>=0.30
+prometheus-client>=0.20
+mlflow-skinny==3.17.2

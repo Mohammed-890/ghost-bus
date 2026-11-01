@@ -1,0 +1,38 @@
+{{- if .Values.daily.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "gb.fullname" . }}-daily
+  labels: {{- include "gb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: daily
+spec:
+  schedule: {{ .Values.daily.schedule | quote }}
+  timeZone: {{ .Values.daily.timeZone }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels: {{- include "gb.selector" . | nindent 12 }}
+            app.kubernetes.io/component: daily
+        spec:
+          restartPolicy: Never
+          securityContext: {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: daily
+              {{- include "gb.common" . | nindent 14 }}
+              command: ["python", "-m", "ghostbus.daily"]
+              env: {{- include "gb.bodsEnv" . | nindent 16 }}
+              resources: {{- toYaml .Values.daily.resources | nindent 16 }}
+              volumeMounts:
+                - {name: data, mountPath: /data}
+                - {name: tmp, mountPath: /tmp}
+          volumes:
+            - name: data
+              persistentVolumeClaim: {claimName: {{ include "gb.fullname" . }}-data}
+            - {name: tmp, emptyDir: {}}
+{{- end }}

@@ -19,8 +19,9 @@ async function main() {
   status(summary);
   if (summary.status !== "ready") return collecting(summary);
 
-  const [routes, recent, shapes, model, daily] = await Promise.all([
+  const [routes, recent, shapes, model, daily, mon] = await Promise.all([
     get("routes.json"), get("recent_ghosts.json"), get("shapes.json"), get("model.json"), get("daily.json"),
+    get("monitoring.json"),
   ]);
   hero(summary, recent || []);
   routePicker(routes || []);
@@ -29,6 +30,26 @@ async function main() {
   drawMap(routes || [], shapes || []);
   facts(summary, daily || []);
   modelTable(model);
+  modelHealth(mon);
+}
+
+function modelHealth(m) {
+  const live = m?.live || [];
+  const last = m?.last_decision;
+  const promoted = (m?.decisions || []).filter((d) => d.action === "promoted").at(-1);
+  if (!live.length && !last) return;
+  const box = $("#model");
+  const parts = [el("h3", {}, "Is the live model still right?")];
+  if (live.length) {
+    const recent = live.slice(-7);
+    const brier = recent.reduce((a, s) => a + s.brier, 0) / recent.length;
+    const actual = recent.reduce((a, s) => a + s.ghost_rate, 0) / recent.length;
+    const predicted = recent.reduce((a, s) => a + s.predicted_ghost_rate, 0) / recent.length;
+    parts.push(el("p", {}, `Over the last ${recent.length} judged days, the model expected ${pct(predicted)} of buses not to run; ${pct(actual)} actually didn't. Brier score on those days: ${brier.toFixed(4)}.`));
+  }
+  if (promoted) parts.push(el("p", {}, `Live model: version ${promoted.version}, promoted on ${day(promoted.day)} because ${promoted.reason}.`));
+  if (last) parts.push(el("p", { class: "small" }, `Latest daily check (${day(last.day)}): ${last.action === "keep" ? "no retraining needed" : last.action === "skip" ? "still collecting data" : `retrained, ${last.action}`}${last.triggers?.length ? ` (${last.triggers.join("; ")})` : ""}.`));
+  box.append(...parts);
 }
 
 function status(s) {

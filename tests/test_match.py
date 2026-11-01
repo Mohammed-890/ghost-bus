@@ -4,7 +4,6 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from ghostbus import config as C
 from ghostbus.match import classify
 from ghostbus.schedule import secs_to_dt
 

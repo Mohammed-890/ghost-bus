@@ -3,14 +3,13 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
 
 from . import config as C
-from .model import evaluate, forecast, load_results
-from .schedule import day_schedule
+from .model import evaluate, load_results
 
 JUDGED = ["ran_tracked", "ran_matched", "ghost"]
 
@@ -75,16 +74,12 @@ def build():
     ops["rate"] = (ops.ghosts / ops.judged).round(4)
     _w("operators.json", ops.sort_values("rate", ascending=False).to_dict("records"))
 
-    # forecast for the next scheduled day we have a timetable for
+    # the champion's stored predictions for the next day (written by the daily job)
     fc = None
-    nxt = last + timedelta(days=1)
-    try:
-        if (C.DATA / "city_gtfs" / "trips.csv").exists():
-            sched, _ = day_schedule(nxt)
-            if len(sched) and evaluate(df)["status"] == "ready":
-                fc = forecast(df, sched)[["route", "direction_id", "start_secs", "p_runs"]]
-    except Exception as e:  # the site still works without a forecast
-        print("forecast skipped:", e)
+    preds = sorted(C.DATA.joinpath("predictions").glob("*.csv.gz")) if C.DATA.joinpath("predictions").exists() else []
+    if preds:
+        fc = pd.read_csv(preds[-1], dtype={"route": str, "direction_id": str})
+        fc["direction_id"] = fc.direction_id.fillna("").astype(str)
 
     routes = []
     for (route, op), g in df.groupby(["route", "operator"]):
@@ -115,7 +110,17 @@ def build():
                                "from": r.from_stop, "to": r.to_stop} for r in worst.itertuples()])
 
     _w("model.json", evaluate(df))
+    _w("monitoring.json", monitoring_summary())
     _route_shapes(df)
+
+
+def monitoring_summary():
+    from .monitor import read_jsonl
+
+    live, drift, decisions = read_jsonl("live.jsonl"), read_jsonl("drift.jsonl"), read_jsonl("decisions.jsonl")
+    return {"live": live[-30:], "drift": drift[-1] if drift else None,
+            "decisions": [d for d in decisions if d.get("action") in ("promoted", "rejected")][-10:],
+            "last_decision": decisions[-1] if decisions else None}
 
 
 def _route_shapes(df):

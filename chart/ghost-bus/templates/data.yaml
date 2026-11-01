@@ -1,0 +1,13 @@
+# Raw pings, timetables and verdicts, shared by the collector and the daily job.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "gb.fullname" . }}-data
+  labels: {{- include "gb.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.data.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests: {storage: {{ .Values.data.storage }}}

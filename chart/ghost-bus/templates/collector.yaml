@@ -1,0 +1,36 @@
+{{- if .Values.collector.enabled }}
+{{- if not .Values.bods.existingSecret }}
+{{- fail "collector.enabled needs bods.existingSecret (a Secret holding the BODS API key)" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gb.fullname" . }}-collector
+  labels: {{- include "gb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: collector
+spec:
+  replicas: 1
+  strategy: {type: Recreate}   # one writer on the data volume
+  selector:
+    matchLabels: {{- include "gb.selector" . | nindent 6 }}
+      app.kubernetes.io/component: collector
+  template:
+    metadata:
+      labels: {{- include "gb.selector" . | nindent 8 }}
+        app.kubernetes.io/component: collector
+    spec:
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: collector
+          {{- include "gb.common" . | nindent 10 }}
+          command: ["python", "-m", "ghostbus.collect", "--minutes", "0"]
+          env: {{- include "gb.bodsEnv" . | nindent 12 }}
+          resources: {{- toYaml .Values.collector.resources | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: {{ include "gb.fullname" . }}-data}
+        - {name: tmp, emptyDir: {}}
+{{- end }}

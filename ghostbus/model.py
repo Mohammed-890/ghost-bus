@@ -8,11 +8,17 @@ Compared against:
   * constant   - every trip gets the overall ghost rate from training days
   * history    - this departure's past ghost rate (falls back to the route,
                  then the overall rate) - what a careful human would do
+
+A trained model travels as a `ModelBundle`: the classifier plus everything
+needed to build its features later (rate tables, the timetable, the
+categories it saw, and a reference sample for drift checks). The registry
+stores bundles; the API and the daily forecast load them.
 """
 from __future__ import annotations
 
 import glob
 import json
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 import numpy as np
@@ -21,12 +27,13 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import average_precision_score, brier_score_loss, log_loss, roc_auc_score
 
 from . import config as C
+from .features import CAT, FEATURES, NUM, add_features, apply_tables, base_columns, compute_tables, departures_table, judged
 
-CAT = ["route", "operator", "direction_id"]
-NUM = ["hour", "weekday", "headway_min", "duration_min", "n_stops", "route_rate_7d", "route_hour_rate_14d",
-       "dep_rate_14d", "dep_obs_14d", "op_rate_7d"]
+WARMUP_DAYS = 3          # a model needs some history before features mean anything
+MIN_DAYS, MIN_GHOSTS = 7, 30
 
 
+# ------------------------------------------------------------------ data
 def load_results() -> pd.DataFrame:
     files = sorted(glob.glob(str(C.RESULTS / "*.csv.gz")))
     if not files:
@@ -37,69 +44,59 @@ def load_results() -> pd.DataFrame:
     return df
 
 
-def _smoothed(ghosts, n, prior, k=5.0):
-    return (ghosts + k * prior) / (n + k)
+def training_frame(results: pd.DataFrame) -> pd.DataFrame:
+    """Judged trips with features and the label `y` (1 = ghost)."""
+    j = results[results.verdict.isin(["ran_tracked", "ran_matched", "ghost"])].copy()
+    if j.empty:
+        return j
+    feats = add_features(j)
+    feats["y"] = (feats.verdict == "ghost").astype(int)
+    return feats[feats.service_date >= min(feats.service_date) + timedelta(days=WARMUP_DAYS)]
 
 
-def add_features(df: pd.DataFrame, history: pd.DataFrame | None = None) -> pd.DataFrame:
-    """df: trips to describe. history: judged trips to learn rates from
-    (defaults to df). Rates for day D only use history from days < D."""
-    df = df.copy()
-    hist = (df if history is None else history)
-    hist = hist[hist.verdict.isin(["ran_tracked", "ran_matched", "ghost"])].copy()
-    hist["g"] = (hist.verdict == "ghost").astype(float)
-    hist["hour"] = (hist.start_secs // 3600).astype(int)
-    prior = hist.g.mean() if len(hist) else 0.05
-
-    df["route"] = df.route.astype(str)
-    df["direction_id"] = df.direction_id.fillna("").astype(str)
-    df["hour"] = (df.start_secs // 3600).astype(int)
-    df["weekday"] = pd.to_datetime(df.service_date).dt.weekday
-    df["duration_min"] = (df.end_secs - df.start_secs) / 60
-    df = df.sort_values(["service_date", "route", "direction_id", "start_secs"])
-    prev = df.groupby(["service_date", "route", "direction_id"]).start_secs.shift()
-    df["headway_min"] = ((df.start_secs - prev) / 60).fillna(120).clip(upper=180)
-
-    days = sorted(set(df.service_date))
-    out = []
-    for d in days:
-        part = df[df.service_date == d].copy()
-        h7 = hist[(hist.service_date < d) & (hist.service_date >= d - timedelta(days=7))]
-        h14 = hist[(hist.service_date < d) & (hist.service_date >= d - timedelta(days=14))]
-        r7 = h7.groupby("route").g.agg(["sum", "count"])
-        o7 = h7.groupby("operator").g.agg(["sum", "count"])
-        rh = h14.groupby(["route", "hour"]).g.agg(["sum", "count"])
-        dep = h14.groupby(["route", "direction_id", "start_secs"]).g.agg(["sum", "count"])
-
-        def look(tbl, keys):
-            idx = pd.MultiIndex.from_frame(part[keys]) if len(keys) > 1 else part[keys[0]]
-            s = tbl.reindex(idx)
-            return s["sum"].fillna(0).to_numpy(), s["count"].fillna(0).to_numpy()
-
-        g, n = look(r7, ["route"]); part["route_rate_7d"] = _smoothed(g, n, prior)
-        g, n = look(o7, ["operator"]); part["op_rate_7d"] = _smoothed(g, n, prior)
-        g, n = look(rh, ["route", "hour"]); part["route_hour_rate_14d"] = _smoothed(g, n, prior)
-        g, n = look(dep, ["route", "direction_id", "start_secs"])
-        part["dep_rate_14d"] = _smoothed(g, n, part.route_rate_7d.to_numpy())
-        part["dep_obs_14d"] = n
-        out.append(part)
-    return pd.concat(out) if out else df
+def enough_data(results: pd.DataFrame) -> tuple[bool, dict]:
+    j = results[results.verdict.isin(["ran_tracked", "ran_matched", "ghost"])] if len(results) else results
+    days = len(set(j.service_date)) if len(j) else 0
+    ghosts = int((j.verdict == "ghost").sum()) if len(j) else 0
+    return days >= MIN_DAYS and ghosts >= MIN_GHOSTS, {"days": days, "ghosts": ghosts}
 
 
-def _model():
-    return HistGradientBoostingClassifier(max_iter=300, learning_rate=0.05, max_leaf_nodes=31, min_samples_leaf=40,
-                                          l2_regularization=1.0, categorical_features="from_dtype", random_state=0)
+# ------------------------------------------------------------------ model
+def make_classifier():
+    # Shallow, strongly regularised trees. Chosen by comparing settings on
+    # 15 synthetic runs (5 seeds x 14/21/28 days): the earlier, deeper model
+    # (31 leaves, 300 rounds) lost to the departure-history baseline in all 15;
+    # this one beat both baselines in all 15.
+    return HistGradientBoostingClassifier(max_iter=150, learning_rate=0.03, max_depth=3, min_samples_leaf=200,
+                                          l2_regularization=5.0, categorical_features="from_dtype", random_state=0)
 
 
-def _X(df):
-    X = df[CAT + NUM].copy()
+def X_with(df: pd.DataFrame, categories: dict) -> pd.DataFrame:
+    """Feature matrix with categories fixed to the ones seen in training, so
+    codes mean the same thing at train and predict time (unseen = missing)."""
+    X = df[FEATURES].copy()
     for c in CAT:
-        X[c] = X[c].astype("category")
+        v = X[c].astype(str)
+        X[c] = pd.Categorical(v.where(v.isin(categories[c])), categories=categories[c])
+    for c in NUM:
+        X[c] = X[c].astype(float)
     return X
 
 
-def _metrics(y, p):
-    m = {"brier": round(float(brier_score_loss(y, p)), 5), "log_loss": round(float(log_loss(y, np.clip(p, 1e-4, 1 - 1e-4), labels=[0, 1])), 4)}
+def categories_of(df: pd.DataFrame) -> dict:
+    return {c: sorted(df[c].astype(str).unique().tolist()) for c in CAT}
+
+
+def fit_classifier(feats: pd.DataFrame):
+    cats = categories_of(feats)
+    clf = make_classifier().fit(X_with(feats, cats), feats.y)
+    return clf, cats
+
+
+def metrics(y, p) -> dict:
+    y, p = np.asarray(y), np.asarray(p)
+    m = {"brier": round(float(brier_score_loss(y, p)), 5),
+         "log_loss": round(float(log_loss(y, np.clip(p, 1e-4, 1 - 1e-4), labels=[0, 1])), 4)}
     if 0 < y.sum() < len(y):
         m["roc_auc"] = round(float(roc_auc_score(y, p)), 3)
         m["avg_precision"] = round(float(average_precision_score(y, p)), 3)
@@ -108,51 +105,99 @@ def _metrics(y, p):
     return m
 
 
-def evaluate(df: pd.DataFrame, min_days: int = 7, min_ghosts: int = 30) -> dict:
-    judged = df[df.verdict.isin(["ran_tracked", "ran_matched", "ghost"])].copy()
-    days = sorted(set(judged.service_date))
-    n_ghosts = int((judged.verdict == "ghost").sum())
-    if len(days) < min_days or n_ghosts < min_ghosts:
-        return {"status": "collecting", "days": len(days), "ghosts": n_ghosts,
-                "needs": f"at least {min_days} days and {min_ghosts} ghost buses"}
-    feats = add_features(judged)
-    feats["y"] = (feats.verdict == "ghost").astype(int)
-    feats = feats[feats.service_date >= days[0] + timedelta(days=3)]          # need some history first
-    days = sorted(set(feats.service_date))
-    cut = days[int(len(days) * 0.7)]
-    tr, te = feats[feats.service_date < cut], feats[feats.service_date >= cut]
-    y = te.y.to_numpy()
+@dataclass
+class ModelBundle:
+    classifier: object
+    categories: dict
+    tables: dict
+    departures: pd.DataFrame
+    reference: dict = field(default_factory=dict)   # drift reference (see drift.py)
+    meta: dict = field(default_factory=dict)        # version, trained_through, metrics, …
 
+    def predict_ghost(self, feats: pd.DataFrame) -> np.ndarray:
+        return self.classifier.predict_proba(X_with(feats, self.categories))[:, 1]
+
+    def features_for_departures(self, rows: pd.DataFrame, service_date: date) -> pd.DataFrame:
+        """Rows from `departures` (headway already set) → model features."""
+        rows = rows.assign(service_date=service_date)
+        return apply_tables(base_columns(rows, headway_from_schedule=False), self.tables)
+
+    def predict_departure(self, route: str, direction_id: str, start_secs: int, service_date: date) -> dict | None:
+        d = self.departures
+        hit = d[(d.route == str(route)) & (d.direction_id == str(direction_id)) & (d.start_secs == int(start_secs))]
+        if hit.empty:
+            return None
+        f = self.features_for_departures(hit.head(1), service_date)
+        p_ghost = float(self.predict_ghost(f)[0])
+        r = hit.iloc[0]
+        return {"route": r.route, "operator": r.operator, "direction_id": r.direction_id,
+                "from_stop": r.from_stop, "to_stop": r.to_stop, "p_runs": round(1 - p_ghost, 4)}
+
+
+# ------------------------------------------------------------------ evaluation
+def split(feats: pd.DataFrame, cut: date | None = None):
+    days = sorted(set(feats.service_date))
+    cut = cut or days[int(len(days) * 0.7)]
+    return feats[feats.service_date < cut], feats[feats.service_date >= cut], cut
+
+
+def evaluate_split(tr: pd.DataFrame, te: pd.DataFrame) -> tuple[dict, object, dict]:
+    y = te.y.to_numpy()
     const = np.full(len(te), tr.y.mean())
     hist = np.where(te.dep_obs_14d >= 3, te.dep_rate_14d, te.route_rate_7d)
-    clf = _model().fit(_X(tr), tr.y)
-    pm = clf.predict_proba(_X(te))[:, 1]
-
+    clf, cats = fit_classifier(tr)
+    pm = clf.predict_proba(X_with(te, cats))[:, 1]
     bins = np.linspace(0, 1, 11)
     which = np.clip(np.digitize(pm, bins) - 1, 0, 9)
     calib = [{"predicted": round(float(pm[which == b].mean()), 3), "actual": round(float(y[which == b].mean()), 3),
               "n": int((which == b).sum())} for b in range(10) if (which == b).sum() >= 20]
-    return {
+    report = {
         "status": "ready",
         "train_days": [str(tr.service_date.min()), str(tr.service_date.max())],
         "test_days": [str(te.service_date.min()), str(te.service_date.max())],
         "n_train": int(len(tr)), "n_test": int(len(te)), "test_ghost_rate": round(float(y.mean()), 4),
-        "constant": _metrics(y, const), "history": _metrics(y, hist), "model": _metrics(y, pm),
+        "constant": metrics(y, const), "history": metrics(y, hist), "model": metrics(y, pm),
         "calibration": calib,
     }
+    return report, clf, cats
 
 
-def forecast(df: pd.DataFrame, tomorrow: pd.DataFrame) -> pd.DataFrame:
-    """Chance each trip in `tomorrow` (a day_schedule table) runs."""
-    judged = df[df.verdict.isin(["ran_tracked", "ran_matched", "ghost"])].copy()
-    feats = add_features(judged)
-    feats["y"] = (feats.verdict == "ghost").astype(int)
-    feats = feats[feats.service_date >= min(feats.service_date) + timedelta(days=3)]
-    clf = _model().fit(_X(feats), feats.y)
-    t = add_features(tomorrow.assign(verdict="?"), history=judged)
-    t["p_runs"] = 1 - clf.predict_proba(_X(t))[:, 1]
+def evaluate(results: pd.DataFrame, min_days: int = MIN_DAYS, min_ghosts: int = MIN_GHOSTS) -> dict:
+    j = results[results.verdict.isin(["ran_tracked", "ran_matched", "ghost"])]
+    days, ghosts = len(set(j.service_date)), int((j.verdict == "ghost").sum())
+    if days < min_days or ghosts < min_ghosts:
+        return {"status": "collecting", "days": days, "ghosts": ghosts,
+                "needs": f"at least {min_days} days and {min_ghosts} ghost buses"}
+    tr, te, _ = split(training_frame(results))
+    return evaluate_split(tr, te)[0]
+
+
+# ------------------------------------------------------------------ production fit
+def fit_bundle(results: pd.DataFrame, schedule: pd.DataFrame, meta: dict | None = None) -> ModelBundle:
+    """Fit on every judged day; rate tables as of the day after the last one."""
+    from .drift import reference_from
+
+    feats = training_frame(results)
+    clf, cats = fit_classifier(feats)
+    last = max(feats.service_date)
+    return ModelBundle(
+        classifier=clf, categories=cats,
+        tables=compute_tables(judged(results), last + timedelta(days=1)),
+        departures=departures_table(schedule),
+        reference=reference_from(feats),
+        meta={"trained_through": str(last), "n_train": int(len(feats)), **(meta or {})},
+    )
+
+
+def forecast(bundle: ModelBundle, schedule: pd.DataFrame, results: pd.DataFrame) -> pd.DataFrame:
+    """Chance each trip in `schedule` (a day_schedule table) runs, with rate
+    tables rebuilt from all results before that day."""
+    day = pd.to_datetime(schedule.service_date.iloc[0]).date()
+    t = base_columns(schedule)
+    t = apply_tables(t, compute_tables(judged(results), day))
+    t["p_runs"] = 1 - bundle.predict_ghost(t)
     return t
 
 
 if __name__ == "__main__":
-    print(json.dumps(evaluate(load_results()), indent=2))
+    print(json.dumps(evaluate(load_results()), indent=2, default=str))

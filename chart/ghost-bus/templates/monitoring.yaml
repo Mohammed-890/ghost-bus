@@ -1,0 +1,115 @@
+{{- if .Values.pushgateway.enabled }}
+# The daily job and the collector are batch-like, so they push metrics here.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gb.fullname" . }}-pushgateway
+  labels: {{- include "gb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pushgateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "gb.selector" . | nindent 6 }}
+      app.kubernetes.io/component: pushgateway
+  template:
+    metadata:
+      labels: {{- include "gb.selector" . | nindent 8 }}
+        app.kubernetes.io/component: pushgateway
+    spec:
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: pushgateway
+          image: {{ .Values.pushgateway.image }}
+          ports:
+            - {name: http, containerPort: 9091}
+          readinessProbe:
+            httpGet: {path: /-/ready, port: http}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 200m, memory: 128Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gb.fullname" . }}-pushgateway
+  labels: {{- include "gb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pushgateway
+spec:
+  selector: {{- include "gb.selector" . | nindent 4 }}
+    app.kubernetes.io/component: pushgateway
+  ports:
+    - {name: http, port: 9091, targetPort: http}
+{{- end }}
+{{- if .Values.monitoring.serviceMonitor }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "gb.fullname" . }}
+  labels: {{- include "gb.labels" . | nindent 4 }}
+    release: {{ .Values.monitoring.release }}
+spec:
+  selector:
+    matchExpressions:
+      - {key: app.kubernetes.io/instance, operator: In, values: [{{ .Release.Name | quote }}]}
+      - {key: app.kubernetes.io/component, operator: In, values: ["api", "pushgateway"]}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      honorLabels: true   # keep the job labels the pushgateway was given
+{{- end }}
+{{- if .Values.monitoring.prometheusRule }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "gb.fullname" . }}
+  labels: {{- include "gb.labels" . | nindent 4 }}
+    release: {{ .Values.monitoring.release }}
+spec:
+  groups:
+    - name: ghost-bus
+      rules:
+        - alert: GhostBusNoModel
+          expr: max(ghostbus_model_loaded) < 1
+          for: 15m
+          labels: {severity: critical}
+          annotations: {summary: "The prediction API has no champion model loaded."}
+        - alert: GhostBusApiErrors
+          expr: sum(rate(ghostbus_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(ghostbus_requests_total[5m])), 1e-9) > 0.05
+          for: 10m
+          labels: {severity: warning}
+          annotations: {summary: "More than 5% of API requests are failing."}
+        - alert: GhostBusFeedDown
+          expr: time() - max(ghostbus_collector_last_ok_timestamp_seconds) > 3600
+          for: 5m
+          labels: {severity: warning}
+          annotations: {summary: "The live bus feed hasn't answered for over an hour; those trips won't be judged."}
+        - alert: GhostBusDailyJobStale
+          expr: time() - max(ghostbus_daily_last_success_timestamp_seconds) > 30 * 3600
+          labels: {severity: warning}
+          annotations: {summary: "The daily job hasn't finished for more than 30 hours."}
+        - alert: GhostBusDataDrift
+          expr: max(ghostbus_daily_psi_max) > 0.2
+          labels: {severity: info}
+          annotations: {summary: "Feature drift (PSI > 0.2); the daily job will retrain and the champion gate decides."}
+        - alert: GhostBusLiveAccuracyFell
+          expr: max(ghostbus_daily_live_brier) > 1.25 * scalar(max(ghostbus_model_test_brier))
+          for: 1h
+          labels: {severity: warning}
+          annotations: {summary: "Yesterday's predictions scored 25% worse than the champion's test score."}
+{{- end }}
+{{- if .Values.monitoring.grafanaDashboard }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gb.fullname" . }}-dashboard
+  labels: {{- include "gb.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  ghost-bus.json: |-
+{{ .Files.Get "files/ghost-bus-dashboard.json" | indent 4 }}
+{{- end }}

@@ -63,8 +63,28 @@ def _append(path, fields, rows):
         w.writerows(rows)
 
 
+def _push(health: list):
+    """Collector heartbeat for Prometheus (only when PUSHGATEWAY_URL is set)."""
+    url = os.environ.get("PUSHGATEWAY_URL")
+    if not url:
+        return
+    try:
+        from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
+
+        reg = CollectorRegistry()
+        Gauge("ghostbus_collector_last_poll_ok", "1 if the last poll of the live feed worked", registry=reg).set(health[1])
+        Gauge("ghostbus_collector_buses", "Buses seen in the last poll", registry=reg).set(health[3])
+        if health[1]:
+            Gauge("ghostbus_collector_last_ok_timestamp_seconds", "When the feed last answered",
+                  registry=reg).set(health[0])
+        push_to_gateway(url, job="ghostbus-collector", registry=reg)
+    except Exception as e:  # monitoring must never stop collection
+        print("pushgateway:", e)
+
+
 def run(minutes: float, api_key: str):
-    end = time.time() + minutes * 60
+    """Poll for `minutes` (GitHub Actions), or forever if minutes <= 0 (Kubernetes)."""
+    end = time.time() + minutes * 60 if minutes > 0 else float("inf")
     while time.time() < end:
         t0 = time.time()
         poll_ts = int(t0)
@@ -79,6 +99,7 @@ def run(minutes: float, api_key: str):
             code = getattr(e, "code", "")
             health = [poll_ts, 0, code, 0, 0, int((time.time() - t0) * 1000), str(e)[:200].replace("\n", " ")]
         _append(C.HEALTH / f"{stamp}.csv.gz", HEALTH_FIELDS, [health])
+        _push(health)
         print(datetime.now(timezone.utc).strftime("%H:%M:%S"), "ok" if health[1] else "FAIL", health[3], "buses", health[4], "with trip")
         time.sleep(max(1, C.POLL_SECONDS - (time.time() - t0)))
 

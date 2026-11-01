@@ -1,0 +1,7 @@
+apiVersion: v2
+name: ghost-bus
+description: Ghost Bus Detector - prediction API, MLflow registry, daily retraining job, live collector and monitoring
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+home: https://github.com/Mohammed-890/ghost-bus

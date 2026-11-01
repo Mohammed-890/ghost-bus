@@ -1,6 +1,7 @@
+# Core pipeline (collector, matching, model, daily job)
 pandas>=2.2
 numpy>=1.26
 scikit-learn>=1.5
+joblib>=1.4
 gtfs-realtime-bindings>=1.0.0
 protobuf>=4.25
-pytest>=8

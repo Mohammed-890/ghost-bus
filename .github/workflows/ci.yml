@@ -1,0 +1,146 @@
+# CI/CD: every pull request and push is linted, tested, scanned and deployed to
+# a throwaway Kubernetes cluster. A merge to main also publishes the images to
+# GHCR and bumps the tags Argo CD deploys (GitOps).
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+env:
+  MLFLOW_DISABLE_AGENT_HINT: "1"
+
+jobs:
+  test:
+    name: Lint and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip, cache-dependency-path: "requirements*.txt"}
+      - run: pip install -q -r requirements-dev.txt
+      - run: ruff check ghostbus tests --select E,F,W --ignore E501
+      - run: python -m pytest -q tests
+
+  chart:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Lint with every values file
+        run: |
+          helm lint chart/ghost-bus
+          helm lint chart/ghost-bus -f deploy/values-ci.yaml
+          helm lint chart/ghost-bus -f deploy/values-prod.yaml
+      - name: Validate rendered manifests against the Kubernetes schemas
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          for v in deploy/values-ci.yaml deploy/values-prod.yaml; do
+            helm template t chart/ghost-bus -f $v | ./kubeconform -strict -summary -kubernetes-version 1.31.0 \
+              -schema-location default \
+              -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          done
+
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: terraform}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+
+  images:
+    name: Build and scan images
+    runs-on: ubuntu-latest
+    needs: [test]
+    permissions: {contents: read, packages: write}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build app image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ghost-bus:ci
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+      - name: Build MLflow image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/mlflow
+          load: true
+          tags: ghost-bus-mlflow:ci
+          cache-from: type=gha,scope=mlflow
+          cache-to: type=gha,mode=max,scope=mlflow
+      - name: Image facts
+        run: |
+          docker image ls --format '{{.Repository}}:{{.Tag}} {{.Size}}' | grep ghost-bus
+          echo "::notice title=image::app image $(docker image inspect ghost-bus:ci --format '{{.Size}}' | awk '{printf "%.0f MB", $1/1e6}'), runs as user $(docker image inspect ghost-bus:ci --format '{{.Config.User}}')"
+          test "$(docker image inspect ghost-bus:ci --format '{{.Config.User}}')" = "10001"
+      - name: Vulnerability scan (fail on fixable critical issues)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ghost-bus:ci
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Save images for the end-to-end job
+        run: docker save ghost-bus:ci ghost-bus-mlflow:ci | gzip > images.tar.gz
+      - uses: actions/upload-artifact@v4
+        with: {name: images, path: images.tar.gz, retention-days: 1}
+      - name: Publish to GHCR (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          SHA=sha-${GITHUB_SHA::7}
+          for img in ghost-bus ghost-bus-mlflow; do
+            for tag in $SHA latest-main; do
+              docker tag $img:ci ghcr.io/mohammed-890/$img:$tag
+              docker push -q ghcr.io/mohammed-890/$img:$tag
+            done
+          done
+          echo "::notice title=published::ghcr.io/mohammed-890/ghost-bus:$SHA"
+
+  e2e:
+    name: End-to-end on Kubernetes (kind)
+    runs-on: ubuntu-latest
+    needs: [images, chart]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: {name: images}
+      - run: gunzip -c images.tar.gz | docker load
+      - uses: helm/kind-action@v1
+        with: {cluster_name: ghost-bus}
+      - run: kind load docker-image ghost-bus:ci ghost-bus-mlflow:ci --name ghost-bus
+      - run: scripts/e2e.sh
+      - if: failure()
+        run: scripts/e2e-debug.sh
+
+  gitops:
+    name: Bump the deployed image tag (GitOps)
+    runs-on: ubuntu-latest
+    needs: [e2e, terraform]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions: {contents: write}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Point Argo CD at this commit's images
+        run: |
+          SHA=sha-${GITHUB_SHA::7}
+          sed -i "s/^  tag: .*/  tag: \"$SHA\"/" deploy/values-prod.yaml
+          git config user.name "ghost-bus-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add deploy/values-prod.yaml
+          git commit -m "deploy: images $SHA [skip ci]" || exit 0
+          git pull --rebase -q && git push -q

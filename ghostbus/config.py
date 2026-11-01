@@ -10,7 +10,7 @@ RAW = DATA / "raw"            # live pings, one gzip CSV per hour
 HEALTH = DATA / "health"      # one row per poll: did the feed answer, how many buses
 SCHEDULE = DATA / "schedule"  # scheduled trips and stop times per service day
 RESULTS = DATA / "results"    # trip-by-trip verdicts per day
-SITE_DATA = ROOT / "docs" / "data"
+SITE_DATA = Path(os.environ.get("GHOSTBUS_SITE", ROOT / "docs" / "data")).resolve()
 
 TZ = ZoneInfo("Europe/London")
 

@@ -1,0 +1,5 @@
+# Local cluster: kind create cluster --name ghost-bus --config deploy/kind/kind-config.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane

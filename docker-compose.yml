@@ -1,0 +1,47 @@
+# Local stack: MLflow + the prediction API, plus one-off jobs.
+#   docker compose up -d mlflow api
+#   docker compose run --rm demo      # seed a demo champion from SYNTHETIC data
+#   docker compose run --rm daily     # the real daily job (needs data in ./store)
+#   open http://localhost:8000/docs and http://localhost:5000
+services:
+  mlflow:
+    build: docker/mlflow
+    command: ["--allowed-hosts", "mlflow:5000,mlflow,localhost:5000,127.0.0.1:5000"]
+    ports: ["5000:5000"]
+    volumes: ["mlflow:/mlflow"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 5s
+      retries: 20
+
+  api:
+    build: .
+    image: ghost-bus:local
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_REFRESH_SECONDS: "30"
+    ports: ["8000:8000"]
+    depends_on:
+      mlflow: {condition: service_healthy}
+
+  daily:
+    image: ghost-bus:local
+    command: ["python", "-m", "ghostbus.daily"]
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes: ["./store:/data"]
+    depends_on:
+      mlflow: {condition: service_healthy}
+    profiles: ["jobs"]
+
+  demo:
+    image: ghost-bus:local
+    command: ["python", "-m", "ghostbus.demo"]
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    depends_on:
+      mlflow: {condition: service_healthy}
+    profiles: ["jobs"]
+
+volumes:
+  mlflow: {}

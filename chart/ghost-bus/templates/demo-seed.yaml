@@ -1,0 +1,31 @@
+{{- if .Values.demo.seedModel }}
+# CI / local trials only: registers a champion trained on SYNTHETIC days so the
+# API has something to serve before real data exists.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "gb.fullname" . }}-demo-seed
+  labels: {{- include "gb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: demo-seed
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: {{- include "gb.selector" . | nindent 8 }}
+        app.kubernetes.io/component: demo-seed
+    spec:
+      restartPolicy: OnFailure
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: seed
+          {{- include "gb.common" . | nindent 10 }}
+          command: ["python", "-m", "ghostbus.demo"]
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits: {cpu: "1", memory: 1536Mi}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: tmp, emptyDir: {}}
+{{- end }}

@@ -1,0 +1,17 @@
+Ghost Bus Detector is installed.
+
+Prediction API:
+  kubectl port-forward svc/{{ include "gb.fullname" . }}-api 8000:80
+  curl "http://localhost:8000/predict?route=52&time=08:10"
+  open http://localhost:8000/docs
+
+{{- if .Values.mlflow.enabled }}
+MLflow (runs, registered models, the champion alias):
+  kubectl port-forward svc/{{ include "gb.mlflowHost" . }} 5000:{{ .Values.mlflow.port }}
+{{- end }}
+
+The API reports ready only once a champion model exists. The daily CronJob
+({{ .Values.daily.schedule }} {{ .Values.daily.timeZone }}) trains and promotes one when there is enough data.
+{{- if not .Values.collector.enabled }}
+The in-cluster collector is off (collector.enabled=false).
+{{- end }}

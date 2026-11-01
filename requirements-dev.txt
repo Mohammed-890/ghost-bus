@@ -1,0 +1,7 @@
+-r requirements.txt
+-r requirements-serve.txt
+# Tests use the full MLflow (SQLite tracking store) and FastAPI's TestClient
+mlflow==3.17.2
+httpx>=0.27
+pytest>=8
+ruff>=0.6

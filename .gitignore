@@ -4,3 +4,10 @@ __pycache__/
 /data/
 /store/
 docs/_demo/
+mlruns/
+# Terraform: never commit state or provider caches (state can hold secrets)
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfvars
+terraform/.terraform.lock.hcl

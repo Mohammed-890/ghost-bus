@@ -1,0 +1,14 @@
+.git
+.github
+docs
+tests
+data
+store
+chart
+deploy
+terraform
+monitoring
+**/__pycache__
+**/*.pyc
+.pytest_cache
+*.md

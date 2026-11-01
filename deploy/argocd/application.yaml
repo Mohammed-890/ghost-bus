@@ -1,0 +1,23 @@
+# kubectl apply -n argocd -f deploy/argocd/application.yaml
+# Argo CD watches the chart and deploy/values-prod.yaml on main, and keeps the
+# cluster in sync with them: a merge that changes an image tag rolls it out.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ghost-bus
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Mohammed-890/ghost-bus
+    targetRevision: main
+    path: chart/ghost-bus
+    helm:
+      valueFiles:
+        - ../../deploy/values-prod.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ghost-bus
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true]

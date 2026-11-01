@@ -1,6 +1,5 @@
 """End to end on disk: GTFS zip -> city cut -> day schedule -> raw pings -> verdicts -> site JSON."""
 import importlib
-import io
 import json
 import zipfile
 from datetime import date
@@ -8,7 +7,7 @@ from datetime import date
 import pandas as pd
 
 
-def make_gtfs(path, day):
+def make_gtfs(path, day, all_days=False):
     stops = "stop_id,stop_name,stop_lat,stop_lon\n" + "".join(
         f"S{i},Stop {i},{53.38 + i * 0.0036},-1.47\n" for i in range(10)) + "FAR,Leeds,53.80,-1.55\n"
     trips = "route_id,service_id,trip_id,direction_id,trip_headsign\n" + \
@@ -21,7 +20,7 @@ def make_gtfs(path, day):
     st.append("LEEDS,10:00:00,10:00:00,FAR,0")
     routes = "route_id,agency_id,route_short_name,route_type\nR1,A,52,3\nR9,A,99,3\nRX,A,X,3\n"
     agency = "agency_id,agency_name,agency_url,agency_timezone\nA,Test Buses,http://x,Europe/London\n"
-    wd = ["0"] * 7
+    wd = ["1"] * 7 if all_days else ["0"] * 7
     wd[day.weekday()] = "1"
     cal = "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n" + \
         f"WK,{','.join(wd)},20260101,20271231\n"

@@ -1,0 +1,16 @@
+# What Argo CD deploys. CI updates image tags here on every merge to main
+# (GitOps: the cluster follows Git, nobody runs kubectl apply by hand).
+image:
+  tag: "latest-main"
+mlflowImage:
+  tag: "latest-main"
+bods:
+  existingSecret: ghost-bus-bods
+collector:
+  enabled: true
+pushgateway:
+  enabled: true
+monitoring:
+  serviceMonitor: true
+  prometheusRule: true
+  grafanaDashboard: true

@@ -1,0 +1,78 @@
+# Image built by CI and pushed to GitHub Container Registry. The tag is the
+# commit SHA; Argo CD deploys whatever tag is committed in deploy/values-prod.yaml.
+image:
+  repository: ghcr.io/mohammed-890/ghost-bus
+  tag: ""                 # defaults to the chart appVersion
+  pullPolicy: IfNotPresent
+
+mlflowImage:
+  repository: ghcr.io/mohammed-890/ghost-bus-mlflow
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# The free Bus Open Data Service key, from an existing Secret (never in values).
+bods:
+  existingSecret: ""      # e.g. ghost-bus-bods
+  secretKey: BODS_API_KEY
+
+api:
+  replicas: 2
+  port: 8000
+  modelRefreshSeconds: 300
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 768Mi}
+  pdb:
+    minAvailable: 1
+
+daily:
+  enabled: true
+  schedule: "0 5 * * *"   # 05:00 UK time, after the night's last buses
+  timeZone: Europe/London
+  resources:
+    requests: {cpu: 250m, memory: 1Gi}
+    limits: {cpu: "2", memory: 3Gi}
+
+collector:
+  enabled: false          # needs bods.existingSecret
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+
+mlflow:
+  enabled: true
+  port: 5000
+  storage: 2Gi
+  resources:
+    requests: {cpu: 100m, memory: 384Mi}
+    limits: {cpu: "1", memory: 1Gi}
+
+data:
+  storage: 5Gi
+  storageClass: ""        # cluster default
+
+pushgateway:
+  enabled: false
+  image: prom/pushgateway:v1.10.0
+
+monitoring:
+  serviceMonitor: false   # needs the Prometheus Operator (kube-prometheus-stack)
+  prometheusRule: false
+  grafanaDashboard: false # picked up by the Grafana sidecar (label grafana_dashboard: "1")
+  release: kube-prometheus-stack
+
+# CI and local trials only: a Job that seeds a champion trained on SYNTHETIC data.
+demo:
+  seedModel: false
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile: {type: RuntimeDefault}
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: {drop: ["ALL"]}

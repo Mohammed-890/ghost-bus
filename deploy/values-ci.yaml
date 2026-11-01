@@ -1,0 +1,15 @@
+# Used by the end-to-end test in CI on a throwaway kind cluster.
+image:
+  pullPolicy: Never      # images are loaded into kind, not pulled
+  tag: ci
+mlflowImage:
+  pullPolicy: Never
+  tag: ci
+api:
+  modelRefreshSeconds: 10
+daily:
+  enabled: false
+demo:
+  seedModel: true        # SYNTHETIC champion so the API has a model to serve
+pushgateway:
+  enabled: true
