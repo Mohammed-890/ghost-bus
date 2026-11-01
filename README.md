@@ -54,7 +54,7 @@ BODS live feed (GTFS-RT, every 60 s) ──► every bus position, around the cl
 
 ## Status
 
-Collection started in late October 2026. The site shows real numbers only, and says so while it is still collecting. The model is trained once there are at least 7 judged days and 30 ghost buses.
+Collection started in late October 2026. The site shows real numbers only, and says so while it is still collecting. The model is trained once there are at least 7 judged days and 30 ghost buses. After that, the daily job retrains it when needed and only puts a new model live if it beats the current one (see below).
 
 ## Limits, honestly
 
