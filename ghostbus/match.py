@@ -88,7 +88,7 @@ def classify(day: date, trips: pd.DataFrame, stops: pd.DataFrame, pings: pd.Data
     out["verdict"] = "unknown"
     out["reason"] = ""
     out["vehicle_id"] = ""
-    out["evidence"] = 0
+    out["evidence"] = 0.0  # pings for tracked trips, match score for position matches
 
     if health.empty:
         out["reason"] = "no polls"
