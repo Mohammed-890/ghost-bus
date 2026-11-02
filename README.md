@@ -45,7 +45,7 @@ BODS live feed (GTFS-RT, every 60 s) ──► every bus position, around the cl
      daily results ──► model: chance each departure runs ──► website
 ```
 
-- **Collector** (`ghostbus/collect.py`, GitHub Actions every 15 min): polls the GTFS-RT feed for the Sheffield bounding box every 60 seconds. Every poll is logged, failures included, so the analysis knows exactly when the feed was and wasn't watched.
+- **Collector** (`ghostbus/collect.py`, GitHub Actions, back to back): polls the GTFS-RT feed for the Sheffield bounding box every 60 seconds. Every poll is logged, failures included, so the analysis knows exactly when the feed was and wasn't watched.
 - **Timetable** (`ghostbus/schedule.py`): downloads the Yorkshire GTFS from BODS weekly, cuts it to stops inside the city, and lists the trips running on each service day (calendar plus exceptions, times past midnight handled).
 - **Matching** (`ghostbus/match.py`): the core. Up to 20% of live positions carry no trip ID ([BODS user forum](https://boduf.discourse.group/t/missing-trip-id-s-in-gtfs-rt-data/124)), so a trip with no exact match is checked against every untagged bus. It has to pass at least 40% of the trip's sampled stops (minimum 3) within 200 m, from 5 minutes early to 25 minutes late, **in the right order**. One bus can't explain two overlapping trips; the best matches are assigned first.
 - **Fairness rules**: a trip is only called a ghost if the feed answered for at least 90% of the trip's polls, the operator had tagged buses visible in at least 80% of them, and the route was seen at least once that day. Anything else is *not judged* and is never counted against anyone.

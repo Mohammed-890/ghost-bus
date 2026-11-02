@@ -5,6 +5,7 @@ name: ci
 on:
   push:
     branches: [main]
+    paths-ignore: ["docs/data/**"]
   pull_request:
   workflow_dispatch:
 concurrency:

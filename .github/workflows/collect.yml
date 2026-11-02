@@ -1,7 +1,8 @@
 # Records live bus positions for Sheffield, back to back, around the clock.
-# Each run polls for 45 minutes; a new run is queued every 15 minutes, so the
-# next one starts as soon as the last finishes. Every poll (and every failure)
-# is saved, so gaps are known and never counted as ghost buses.
+# Each run polls for 55 minutes and queues the next run as soon as it starts,
+# so collection is continuous (GitHub runs frequent schedules only every few
+# hours, so the schedule is just a backup that restarts the chain). Every poll
+# (and every failure) is saved, so gaps are known and never counted as ghosts.
 name: collect
 on:
   schedule:
@@ -12,10 +13,11 @@ concurrency:
   cancel-in-progress: false
 permissions:
   contents: write
+  actions: write
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 70
     steps:
       - name: Check the API key is set
         id: key
@@ -26,6 +28,11 @@ jobs:
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
           fi
+      - name: Queue the next run (it starts when this one finishes)
+        if: steps.key.outputs.ok == 'true'
+        run: gh workflow run collect.yml --repo "$GITHUB_REPOSITORY" --ref main
+        env:
+          GH_TOKEN: ${{ github.token }}
       - uses: actions/checkout@v4
         if: steps.key.outputs.ok == 'true'
       - uses: actions/checkout@v4
@@ -42,7 +49,7 @@ jobs:
         run: pip install -q -r requirements.txt
       - name: Poll the live feed
         if: steps.key.outputs.ok == 'true'
-        run: python -m ghostbus.collect --minutes 45
+        run: python -m ghostbus.collect --minutes 55
         env:
           BODS_API_KEY: ${{ secrets.BODS_API_KEY }}
           GHOSTBUS_DATA: store
@@ -56,3 +63,15 @@ jobs:
           git commit -qm "pings $(date -u +%Y-%m-%dT%H:%MZ)" || exit 0
           for i in 1 2 3 4 5; do git pull -q --rebase && git push -q && exit 0; sleep $((i*5)); done
           exit 1
+      - name: Show live status on the website
+        if: always() && steps.key.outputs.ok == 'true'
+        run: |
+          python -m ghostbus.publish --health
+          git config user.name "ghost-bus-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add docs/data/summary.json
+          git commit -qm "live status $(date -u +%Y-%m-%dT%H:%MZ)" || exit 0
+          for i in 1 2 3 4 5; do git pull -q --rebase && git push -q && exit 0; sleep $((i*5)); done
+          exit 1
+        env:
+          GHOSTBUS_DATA: store
