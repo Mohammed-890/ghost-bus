@@ -84,6 +84,19 @@ def classify(day: date, trips: pd.DataFrame, stops: pd.DataFrame, pings: pd.Data
         if c not in trips:
             trips[c] = ""
     trips["agency_id"] = trips.agency_id.fillna("").astype(str)
+
+    # Timetables often contain the same departure several times under different
+    # trip IDs (overlapping versions of an operator's timetable). A bus reports
+    # only one of them, so the copies would look like ghosts. Keep one row per
+    # real departure and treat a ping on any copy as a ping on that departure.
+    key = ["operator", "route", "direction_id", "start_secs", "from_stop"]
+    canon = trips.groupby(key, dropna=False, sort=False).trip_id.transform("first")
+    alias = dict(zip(trips.trip_id, canon))
+    trips = trips[trips.trip_id == canon]
+    if not pings.empty and "trip_id" in pings:
+        pings = pings.copy()
+        pings["trip_id"] = pings.trip_id.map(lambda t: alias.get(t, t) if isinstance(t, str) else t)
+
     out = trips[cols].copy().reset_index(drop=True)
     out["verdict"] = "unknown"
     out["reason"] = ""

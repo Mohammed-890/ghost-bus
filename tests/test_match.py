@@ -121,3 +121,17 @@ def test_no_polls_means_no_verdicts():
     trips, st, pings, _ = scenario()
     r = classify(DAY, trips, st, pings, pd.DataFrame())
     assert (r.verdict == "unknown").all()
+
+
+def test_duplicate_timetable_entries_count_as_one_departure():
+    """The same departure listed under two trip IDs must not make a ghost."""
+    a = trip("DUP-A", 8.0)
+    b = dict(a, trip_id="DUP-B")
+    hb_trip = trip("HB1", 7.0)
+    trips = pd.DataFrame([a, b, hb_trip])
+    st = pd.DataFrame(stop_times(a) + stop_times(b) + stop_times(hb_trip))
+    pings = pd.DataFrame(drive(a, "V1", trip_id="DUP-B") + heartbeat("HB1", 7.0, 9.5))
+    r = classify(DAY, trips, st, pings, polls(7.0, 9.5))
+    dup = r[r.start_secs == a["start_secs"]]
+    assert len(dup) == 1
+    assert dup.verdict.iloc[0] == "ran_tracked"
