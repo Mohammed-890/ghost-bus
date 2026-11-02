@@ -1,0 +1,1 @@
+{"route":"86","operator":"First South Yorkshire","id":"86-first-south-yorkshire","by_hour":[[10,1,0],[20,1,0]],"departures":[{"direction_id":"0","from_stop":"Angel Street/CG3","to_stop":"Hunshelf Road/Birch Avenue","days":1,"ghosts":0,"time":"20:25"},{"direction_id":"1","from_stop":"Hunshelf Road/Birch Avenue","to_stop":"Arundel Gate/AG9","days":1,"ghosts":0,"time":"10:33"}]}
