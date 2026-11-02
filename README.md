@@ -142,6 +142,8 @@ With Argo CD, nobody runs `kubectl apply`: CI writes the new image tag to `deplo
 
 ### What broke while building it
 
+- **The first real day showed 46 ghost buses, and 45 of them were wrong.** The timetable lists most departures two or three times under different trip IDs (overlapping timetable versions). A bus only reports one of them, so the copies looked like buses that never came. Each departure is now counted once, and a test covers it. After the fix: 1 ghost out of 666 judged trips.
+- **The collector only ran every 3–4 hours.** GitHub runs frequent schedules late, so each run now queues the next one itself and collection is continuous.
 - **MLflow kept getting OOMKilled** in Kubernetes at 1 GiB. MLflow 3 starts about eight background job workers (around 250 MB each) for GenAI evaluation. Turning those off and running one web worker brought it to about 550 MB.
 - **The first tuned model lost to a simple baseline.** It did worse than "this departure's own past rate" on 15 out of 15 time splits. A shallower, more regularised model beat both baselines on 15 out of 15.
 - **Drift detection missed a real shift.** Quantile-binned PSI can't see a change in a feature with only a few values, like hour of day. Features with 30 or fewer distinct values now use PSI by value.
