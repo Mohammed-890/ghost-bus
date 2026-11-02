@@ -78,11 +78,13 @@ function collecting(s) {
 
 function hero(s, recent) {
   const w = s.last7.judged ? s.last7 : s;
-  $("#headline").textContent = `Last week, ${num(w.ghosts)} timetabled buses in Sheffield never turned up.`;
+  const when = (s.days || 0) >= 7 ? "In the last 7 days" : (s.days === 1 ? "On our first full day" : `In our first ${s.days} days`);
+  const n = w.ghosts || 0;
+  $("#headline").textContent = `${when}, ${num(n)} timetabled ${n === 1 ? "bus" : "buses"} in Sheffield never turned up.`;
   const one = w.ghost_rate ? Math.round(1 / w.ghost_rate) : null;
-  $("#subline").textContent = one
-    ? `That’s 1 in ${one} of the ${num(w.judged)} trips we could check, measured from live bus GPS, trip by trip.`
-    : `Out of ${num(w.judged)} trips we could check, measured from live bus GPS.`;
+  $("#subline").textContent = one && n >= 5
+    ? `That’s about 1 in ${one} of the ${num(w.judged)} trips we could check, measured from live bus GPS, trip by trip.`
+    : `Out of ${num(w.judged)} trips we could check, measured from live bus GPS, trip by trip. Collection started on ${day(s.first_day)}, so the numbers grow every day.`;
   const latest = recent.length ? recent[0].date : null;
   const rows = recent.filter((r) => r.date === latest).slice(0, 7);
   $("#board").replaceChildren(el("h4", {}, latest ? `Ghost buses, ${day(latest)}` : "No ghost buses yet"),
