@@ -47,31 +47,19 @@ jobs:
           cache: pip
       - if: steps.key.outputs.ok == 'true'
         run: pip install -q -r requirements.txt
-      - name: Poll the live feed
+      - name: Poll the live feed, saving and updating the website every 13 minutes
         if: steps.key.outputs.ok == 'true'
-        run: python -m ghostbus.collect --minutes 55
+        run: |
+          git config --global user.name "ghost-bus-bot"
+          git config --global user.email "actions@users.noreply.github.com"
+          push() { for i in 1 2 3 4 5; do git pull -q --rebase && git push -q && return 0; sleep $((i*5)); done; return 1; }
+          for round in 1 2 3 4; do
+            python -m ghostbus.collect --minutes 13 || echo "::warning::collector round $round stopped early"
+            (cd store && git add -A && { git commit -qm "pings $(date -u +%Y-%m-%dT%H:%MZ)" && push || true; })
+            python -m ghostbus.publish --health
+            git add docs/data/summary.json docs/data/live.json
+            git commit -qm "live status $(date -u +%Y-%m-%dT%H:%MZ)" && push || true
+          done
         env:
           BODS_API_KEY: ${{ secrets.BODS_API_KEY }}
-          GHOSTBUS_DATA: store
-      - name: Save
-        if: always() && steps.key.outputs.ok == 'true'
-        working-directory: store
-        run: |
-          git config user.name "ghost-bus-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add -A
-          git commit -qm "pings $(date -u +%Y-%m-%dT%H:%MZ)" || exit 0
-          for i in 1 2 3 4 5; do git pull -q --rebase && git push -q && exit 0; sleep $((i*5)); done
-          exit 1
-      - name: Show live status on the website
-        if: always() && steps.key.outputs.ok == 'true'
-        run: |
-          python -m ghostbus.publish --health
-          git config user.name "ghost-bus-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add docs/data/summary.json
-          git commit -qm "live status $(date -u +%Y-%m-%dT%H:%MZ)" || exit 0
-          for i in 1 2 3 4 5; do git pull -q --rebase && git push -q && exit 0; sleep $((i*5)); done
-          exit 1
-        env:
           GHOSTBUS_DATA: store

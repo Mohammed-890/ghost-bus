@@ -129,3 +129,6 @@ caption { text-align: left; color: var(--muted); font-size: .9rem; padding-botto
   .pick select { min-width: 0; width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+
+.now-map { height: 420px; }
+@media (max-width: 640px) { .now-map { height: 320px; } }

@@ -13,7 +13,28 @@ const num = (x) => (x ?? 0).toLocaleString("en-GB");
 const day = (s) => new Date(s + "T12:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
 const time = (iso) => iso ? new Date(iso).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
 
+async function liveNow() {
+  const live = await get("live.json");
+  if (!window.L || !live || !live.buses?.length) return;
+  $("#now").hidden = false;
+  const n = live.buses.length;
+  const mins = Math.round((Date.now() - new Date(live.at).getTime()) / 60000);
+  $("#now-caption").textContent = `${num(n)} buses on Sheffield’s roads at ${time(live.at)}${mins < 120 ? ` (${mins} min ago)` : ""}. Each dot is a bus reporting its GPS position. This refreshes about every 15 minutes.`;
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const map = L.map("now-map", { scrollWheelZoom: false }).setView([53.381, -1.47], 12);
+  L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png`, {
+    attribution: "© OpenStreetMap contributors © CARTO", maxZoom: 17 }).addTo(map);
+  const pts = [];
+  for (const [lat, lon, route] of live.buses) {
+    L.circleMarker([lat, lon], { radius: 5, weight: 1.5, color: dark ? "#1b1830" : "#ffffff", fillColor: "#7b5cff", fillOpacity: 0.95 })
+      .bindTooltip(route ? `Route ${route}` : "Bus (no route reported)").addTo(map);
+    pts.push([lat, lon]);
+  }
+  if (pts.length > 3) map.fitBounds(pts, { padding: [24, 24], maxZoom: 13 });
+}
+
 async function main() {
+  liveNow();
   const summary = await get("summary.json");
   if (!summary) return collecting(null);
   status(summary);

@@ -148,6 +148,30 @@ def refresh_health():
     summary["health"] = health_summary()
     summary["updated"] = datetime.now(C.TZ).isoformat(timespec="minutes")
     _w("summary.json", summary)
+    live_positions()
+
+
+def live_positions(max_age_s: int = 600):
+    """Every bus at the latest poll (reports older than 10 minutes left out),
+    so the website can show the city's buses right now."""
+    days = sorted(p for p in C.RAW.iterdir() if p.is_dir()) if C.RAW.exists() else []
+    files = sorted(days[-1].glob("*.csv.gz")) if days else []
+    if not files:
+        return
+    df = pd.read_csv(files[-1], dtype={"route_id": str, "vehicle_id": str})
+    if df.empty:
+        return
+    at = int(df.poll_ts.max())
+    now = df[(df.poll_ts == at) & (at - df.ts.fillna(0) <= max_age_s)].drop_duplicates("vehicle_id")
+    names = {}
+    routes = C.DATA / "city_gtfs" / "routes.csv"
+    if routes.exists():
+        r = pd.read_csv(routes, dtype=str)
+        names = dict(zip(r.route_id, r.route_short_name))
+    buses = [[round(float(x.lat), 5), round(float(x.lon), 5), names.get(str(x.route_id), "") if isinstance(x.route_id, str) else "",
+              int(x.bearing) if pd.notna(x.bearing) and x.bearing >= 0 else None]
+             for x in now.itertuples()]
+    _w("live.json", {"at": datetime.fromtimestamp(at, C.TZ).isoformat(timespec="minutes"), "buses": buses})
 
 
 if __name__ == "__main__":
