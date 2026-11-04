@@ -1,1 +1,1 @@
-{"route":"784","operator":"SMT Bus and Coach Ltd","id":"784-smt-bus-and-coach-ltd","by_hour":[],"departures":[]}
+{"route":"784","operator":"SMT Bus and Coach Ltd","id":"784-smt-bus-and-coach-ltd","by_hour":[[7,1,0],[15,1,0]],"departures":[{"direction_id":"0","from_stop":"Ecclesfield Road/Park Avenue","to_stop":"Fulwood Road/Riverdale Road","days":1,"ghosts":0,"time":"07:37"},{"direction_id":"1","from_stop":"Fulwood Road/Riverdale Road","to_stop":"The Common/Station Road","days":1,"ghosts":0,"time":"15:45"}]}

@@ -1,1 +1,1 @@
-{"route":"777","operator":"Heatons Coaches","id":"777-heatons-coaches","by_hour":[[7,1,0]],"departures":[{"direction_id":"0","from_stop":"The Common/Washington Road","to_stop":"Ecclesfield Road/Cowley View Road","days":1,"ghosts":0,"time":"07:55"}]}
+{"route":"777","operator":"Heatons Coaches","id":"777-heatons-coaches","by_hour":[[7,2,0]],"departures":[{"direction_id":"0","from_stop":"The Common/Washington Road","to_stop":"Ecclesfield Road/Cowley View Road","days":2,"ghosts":0,"time":"07:55"}]}

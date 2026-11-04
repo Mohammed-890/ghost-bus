@@ -1,1 +1,1 @@
-{"route":"71S","operator":"TM Travel","id":"71s-tm-travel","by_hour":[[15,1,0]],"departures":[{"direction_id":"1","from_stop":"Aughton Road/Aston Academy","to_stop":"Sheffield Interchange/C5","days":1,"ghosts":0,"time":"15:10"}]}
+{"route":"71S","operator":"TM Travel","id":"71s-tm-travel","by_hour":[[15,2,0]],"departures":[{"direction_id":"1","from_stop":"Aughton Road/Aston Academy","to_stop":"Sheffield Interchange/C5","days":2,"ghosts":0,"time":"15:10"}]}

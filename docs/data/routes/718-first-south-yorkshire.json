@@ -1,1 +1,1 @@
-{"route":"718","operator":"First South Yorkshire","id":"718-first-south-yorkshire","by_hour":[],"departures":[]}
+{"route":"718","operator":"First South Yorkshire","id":"718-first-south-yorkshire","by_hour":[[14,1,0]],"departures":[{"direction_id":"0","from_stop":"Lees Hall Road/Harvey Clough Road","to_stop":"Prince of Wales Road/City Road","days":1,"ghosts":0,"time":"14:55"}]}
