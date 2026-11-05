@@ -1,1 +1,1 @@
-{"route":"615","operator":"First South Yorkshire","id":"615-first-south-yorkshire","by_hour":[[15,2,0]],"departures":[{"direction_id":"0","from_stop":"Ridgeway/Herringthorpe Valley Road","to_stop":"Rotherham Interchange/C4","days":2,"ghosts":0,"time":"15:08"}]}
+{"route":"615","operator":"First South Yorkshire","id":"615-first-south-yorkshire","by_hour":[[15,3,0]],"departures":[{"direction_id":"0","from_stop":"Ridgeway/Herringthorpe Valley Road","to_stop":"Rotherham Interchange/C4","days":3,"ghosts":0,"time":"15:08"}]}

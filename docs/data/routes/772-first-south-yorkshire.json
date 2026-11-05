@@ -1,1 +1,1 @@
-{"route":"772","operator":"First South Yorkshire","id":"772-first-south-yorkshire","by_hour":[],"departures":[]}
+{"route":"772","operator":"First South Yorkshire","id":"772-first-south-yorkshire","by_hour":[[16,2,1]],"departures":[{"direction_id":"1","from_stop":"Hathersage Road/Burbage Bridge","to_stop":"Ecclesall Road South/Harley Road","days":1,"ghosts":0,"time":"16:05"},{"direction_id":"1","from_stop":"Hathersage Road/Burbage Bridge","to_stop":"Ecclesall Road South/Harley Road","days":1,"ghosts":1,"time":"16:07"}]}
