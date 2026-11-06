@@ -1,1 +1,1 @@
-{"route":"216","operator":"First South Yorkshire","id":"216-first-south-yorkshire","by_hour":[[4,2,0]],"departures":[{"direction_id":"0","from_stop":"Sheffield Interchange/C6","to_stop":"Main Street/High Street","days":2,"ghosts":0,"time":"04:57"}]}
+{"route":"216","operator":"First South Yorkshire","id":"216-first-south-yorkshire","by_hour":[[4,3,0]],"departures":[{"direction_id":"0","from_stop":"Sheffield Interchange/C6","to_stop":"Main Street/High Street","days":3,"ghosts":0,"time":"04:57"}]}
