@@ -1,1 +1,1 @@
-{"route":"601","operator":"First South Yorkshire","id":"601-first-south-yorkshire","by_hour":[[8,4,0]],"departures":[{"direction_id":"1","from_stop":"East Bawtry Road/Worrygoose Lane","to_stop":"Rotherham Interchange/B6","days":4,"ghosts":0,"time":"08:15"}]}
+{"route":"601","operator":"First South Yorkshire","id":"601-first-south-yorkshire","by_hour":[[8,5,0]],"departures":[{"direction_id":"1","from_stop":"East Bawtry Road/Worrygoose Lane","to_stop":"Rotherham Interchange/B6","days":5,"ghosts":0,"time":"08:15"}]}

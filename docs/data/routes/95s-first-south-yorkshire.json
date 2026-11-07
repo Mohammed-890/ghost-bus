@@ -1,1 +1,1 @@
-{"route":"95S","operator":"First South Yorkshire","id":"95s-first-south-yorkshire","by_hour":[[14,4,0]],"departures":[{"direction_id":"0","from_stop":"Tinker Lane/Bole Hill Road","to_stop":"Rotherham Interchange/A3","days":4,"ghosts":0,"time":"14:33"}]}
+{"route":"95S","operator":"First South Yorkshire","id":"95s-first-south-yorkshire","by_hour":[[14,5,0]],"departures":[{"direction_id":"0","from_stop":"Tinker Lane/Bole Hill Road","to_stop":"Rotherham Interchange/A3","days":5,"ghosts":0,"time":"14:33"}]}
