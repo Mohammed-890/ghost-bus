@@ -7,3 +7,4 @@
 {"name": "daily-2026-11-05", "at": "2026-11-05T12:43:15+00:00", "judged_trips": 4340, "ghost_rate": 0.017511520737327188, "feed_ok_share": 1.0, "promoted": 0, "last_success_timestamp_seconds": 1793882595.385536}
 {"name": "daily-2026-11-06", "at": "2026-11-06T12:26:50+00:00", "judged_trips": 3944, "ghost_rate": 0.019523326572008115, "feed_ok_share": 1.0, "promoted": 0, "last_success_timestamp_seconds": 1793968010.7074604}
 {"name": "daily-2026-11-07", "at": "2026-11-07T11:18:27+00:00", "judged_trips": 4344, "ghost_rate": 0.02716390423572744, "feed_ok_share": 1.0, "promoted": 0, "last_success_timestamp_seconds": 1794050307.8218346}
+{"name": "daily-2026-11-08", "at": "2026-11-08T11:30:02+00:00", "judged_trips": 3693, "ghost_rate": 0.020308692120227456, "feed_ok_share": 1.0, "champion_version": "1", "promoted": 1, "last_success_timestamp_seconds": 1794137402.3254366}
