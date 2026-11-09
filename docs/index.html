@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Ghost Bus Detector – Sheffield</title>
-  <meta name="description" content="Which timetabled buses in Sheffield never actually turn up? Measured from the government's live bus location feed, trip by trip.">
+  <title>Ghost Bus Detector – Sheffield live bus checker</title>
+  <meta name="description" content="Is your Sheffield bus actually coming? Live times for every bus in Sheffield, checked against GPS: on the road now, ran, or never turned up.">
   <meta property="og:title" content="Ghost Bus Detector – Sheffield">
   <meta property="og:description" content="Timetabled buses that never turn up, measured from live bus GPS, trip by trip.">
   <meta property="og:image" content="https://mohammed-890.github.io/ghost-bus/social.png">
@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="css/style.css?v=4">
+  <link rel="stylesheet" href="css/style.css?v=5">
 </head>
 <body>
   <header class="bar">
@@ -25,11 +25,42 @@
   </header>
 
   <main>
-    <section class="hero wrap">
-      <p class="place">Sheffield</p>
-      <h1 id="headline">Some buses on the timetable never come.</h1>
-      <p class="sub" id="subline">This site counts them, trip by trip, from the government’s live bus location feed.</p>
-      <div class="board" id="board" aria-hidden="true"></div>
+    <section class="lead wrap">
+      <h1>Is your Sheffield bus actually coming?</h1>
+      <p class="sub">Live times for every bus in Sheffield, checked against the buses’ own GPS. See which buses are on the road now, which ran, and which never turned up.</p>
+      <div class="finder" role="search">
+        <label for="q">Find your stop or route</label>
+        <div class="finder-box">
+          <input id="q" type="search" autocomplete="off" spellcheck="false" placeholder="Stop name or route number, e.g. Arundel Gate or 52"
+                 role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="q-list">
+          <ul id="q-list" class="q-list" role="listbox" hidden></ul>
+        </div>
+        <p class="try" id="try" hidden></p>
+      </div>
+      <p class="today" id="today" aria-live="polite">Loading today’s buses…</p>
+    </section>
+
+    <section class="wrap block live" id="live" hidden>
+      <div class="live-head">
+        <div>
+          <p class="kicker" id="live-kind"></p>
+          <h2 id="live-title"></h2>
+          <p class="hint" id="live-meta"></p>
+        </div>
+        <button type="button" class="ghost-btn" id="live-close">Close</button>
+      </div>
+      <div class="tabs" id="live-tabs" role="tablist"></div>
+      <div class="live-grid">
+        <ol class="deps" id="live-list"></ol>
+        <div id="live-map" class="live-map" role="img" aria-label="Map of this stop or route and its buses on the road now"></div>
+      </div>
+      <p class="small key">
+        <span class="pill o">On the road</span> a bus is reporting this trip right now.
+        <span class="pill p">Due</span> should be running, not confirmed yet.
+        <span class="pill r">Ran</span> a bus was seen doing it.
+        <span class="pill g">Never came</span> no bus seen, while the operator was reporting its other buses.
+        <span class="pill n">No live data</span> the operator wasn’t reporting, so we can’t tell. Times are UK time.
+      </p>
     </section>
 
     <section class="block now-block" id="now" hidden>
@@ -40,9 +71,15 @@
       <div id="now-map" class="map now-map" role="img" aria-label="Map of buses in Sheffield at the latest check"></div>
     </section>
 
+    <section class="hero wrap picture">
+      <h2 id="headline">Some buses on the timetable never come.</h2>
+      <p class="sub" id="subline">This site counts them, trip by trip, from the government’s live bus location feed.</p>
+      <div class="board" id="board" aria-hidden="true"></div>
+    </section>
+
     <section class="wrap block" id="check">
-      <h2>Check your bus</h2>
-      <p class="hint">Every timetabled departure, and how often a bus actually ran it.</p>
+      <h2>Route history</h2>
+      <p class="hint">Every timetabled departure on a route, and how often a bus actually ran it over the past days.</p>
       <label class="pick">
         <span>Route</span>
         <select id="route-select"><option value="">Choose a route</option></select>
@@ -92,6 +129,7 @@
   </footer>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-  <script src="js/app.js?v=4" type="module"></script>
+  <script src="js/app.js?v=5" type="module"></script>
+  <script src="js/live.js?v=5" type="module"></script>
 </body>
 </html>

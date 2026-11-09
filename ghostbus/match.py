@@ -75,7 +75,9 @@ def _sample(seq: pd.DataFrame, n: int) -> pd.DataFrame:
 
 # ------------------------------------------------------------------ core
 def classify(day: date, trips: pd.DataFrame, stops: pd.DataFrame, pings: pd.DataFrame, health: pd.DataFrame,
-             all_trip_agency: dict | None = None) -> pd.DataFrame:
+             all_trip_agency: dict | None = None, settle_secs: int = 3600) -> pd.DataFrame:
+    """Judge every trip of the day. A trip is only judged once settle_secs have passed since its
+    scheduled end (the daily job waits an hour; the live board uses a shorter wait)."""
     t0 = secs_to_dt(day, 0).timestamp()
     trips = trips.copy()
     cols = ["trip_id", "route_id", "route", "operator", "agency_id", "direction_id", "trip_headsign",
@@ -145,7 +147,7 @@ def classify(day: date, trips: pd.DataFrame, stops: pd.DataFrame, pings: pd.Data
     pending = {}  # trip index -> reason it would be "unknown" instead of "ghost" if no bus is found
     for i, row in out.iterrows():
         tid, a, b = row.trip_id, row.start_secs, row.end_secs
-        if b + 3600 > last_poll:
+        if b + settle_secs > last_poll:
             out.at[i, "reason"] = "not finished when last checked"
             continue
         if tid in by_trip.groups:

@@ -169,6 +169,11 @@ def refresh_health():
     summary["updated"] = datetime.now(C.TZ).isoformat(timespec="minutes")
     _w("summary.json", summary)
     live_positions()
+    try:  # the live departure board; never let it stop the rest of the update
+        from . import board
+        board.publish()
+    except Exception as e:  # noqa: BLE001
+        print(f"live board not updated: {e!r}")
 
 
 def live_positions(max_age_s: int = 600):

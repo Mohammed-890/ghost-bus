@@ -67,7 +67,7 @@ jobs:
             for i in 1 2 3; do
               git fetch -q origin main && git reset -q --hard origin/main
               python -m ghostbus.publish --health || { echo "::warning::live status not refreshed"; return 0; }
-              git add docs/data/summary.json docs/data/live.json
+              git add -A docs/data
               git commit -qm "live status $(date -u +%Y-%m-%dT%H:%MZ)" || return 0
               git push -q && return 0
               sleep $((i*5))
