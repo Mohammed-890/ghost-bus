@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from datetime import datetime, timedelta
 
@@ -14,11 +15,27 @@ from .model import evaluate, load_results
 JUDGED = ["ran_tracked", "ran_matched", "ghost"]
 
 
+def _clean(x):
+    """NaN and infinity aren't valid JSON (browsers refuse the whole file), so publish them as null."""
+    if isinstance(x, float):
+        return x if math.isfinite(x) else None
+    if isinstance(x, dict):
+        return {k: _clean(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_clean(v) for v in x]
+    if hasattr(x, "item") and not isinstance(x, (str, bytes)):  # numpy scalars
+        try:
+            return _clean(x.item())
+        except (TypeError, ValueError):
+            return x
+    return x
+
+
 def _w(name, obj):
     C.SITE_DATA.mkdir(parents=True, exist_ok=True)
     path = C.SITE_DATA / name
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(obj, separators=(",", ":"), default=str))
+    path.write_text(json.dumps(_clean(obj), separators=(",", ":"), default=str, allow_nan=False))
 
 
 def hhmm(secs):
