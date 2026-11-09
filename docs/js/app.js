@@ -28,7 +28,7 @@ async function liveNow() {
   const mins = Math.round((Date.now() - new Date(live.at).getTime()) / 60000);
   $("#now-caption").textContent = `${num(n)} buses on Sheffield’s roads at ${time(live.at)}${mins < 120 ? ` (${mins} min ago)` : ""}. Each dot is a bus reporting its GPS position. This refreshes about every 15 minutes.`;
   const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-  const map = L.map("now-map", { scrollWheelZoom: false }).setView([53.381, -1.47], 12);
+  const map = L.map("now-map", { scrollWheelZoom: false, zoomSnap: 0.25 }).setView([53.381, -1.47], 12);
   baseMap(map, dark);
   const pts = [];
   for (const [lat, lon, route] of live.buses) {
@@ -37,7 +37,7 @@ async function liveNow() {
     pts.push([lat, lon]);
   }
   // size the map only once the section is laid out, otherwise Leaflet zooms out to the whole region
-  requestAnimationFrame(() => { map.invalidateSize(); if (pts.length > 3) map.fitBounds(pts, { padding: [24, 24], maxZoom: 13 }); });
+  requestAnimationFrame(() => { map.invalidateSize(); if (pts.length > 3) map.fitBounds(pts, { padding: [16, 16], maxZoom: 13 }); });
 }
 
 async function main() {
@@ -75,8 +75,21 @@ function modelHealth(m) {
     const predicted = recent.reduce((a, s) => a + s.predicted_ghost_rate, 0) / recent.length;
     parts.push(el("p", {}, `Over the last ${recent.length} judged days, the model expected ${pct(predicted)} of buses not to run; ${pct(actual)} actually didn't. Brier score on those days: ${brier.toFixed(4)}.`));
   }
-  if (promoted) parts.push(el("p", {}, `Live model: version ${promoted.version}, promoted on ${day(promoted.day)} because ${promoted.reason}.`));
-  if (last) parts.push(el("p", { class: "small" }, `Latest daily check (${day(last.day)}): ${last.action === "keep" ? "no retraining needed" : last.action === "skip" ? "still collecting data" : `retrained, ${last.action}`}${last.triggers?.length ? ` (${last.triggers.join("; ")})` : ""}.`));
+  if (promoted) {
+    const bar = promoted.champion_brier ?? promoted.baseline_brier;
+    const why = promoted.challenger_brier != null && bar != null
+      ? `it beat ${promoted.champion_brier != null ? "the previous model" : "the simple baseline"} on days it had never seen (Brier ${promoted.challenger_brier.toFixed(4)} vs ${bar.toFixed(4)})`
+      : promoted.reason;
+    parts.push(el("p", {}, `Live model: version ${promoted.version}, promoted on ${day(promoted.day)} because ${why}.`));
+  }
+  if (last) {
+    const what = last.action === "skip" ? "still collecting data"
+      : last.action === "keep" && last.triggers?.length ? `the data has shifted (${last.triggers.map((t) => t.replace(/^data drift \((.*)\)$/, "$1")).join("; ")}), so a new model will be trained and tested once there are enough new days to compare it fairly`
+      : last.action === "keep" ? "the live model is still accurate, no retraining needed"
+      : last.promoted ? "a retrained model did better and replaced the live one"
+      : "a retrained model was tested but didn’t beat the live one, so the live one stays";
+    parts.push(el("p", { class: "small" }, `Latest daily check (${day(last.day)}): ${what}.`));
+  }
   box.append(...parts);
 }
 
@@ -85,7 +98,7 @@ function status(s) {
   const live = h.last_poll && Date.now() - new Date(h.last_poll).getTime() < 3 * 3600e3;
   $("#status").replaceChildren(
     el("span", { class: live ? "dot" : "dot off", "aria-hidden": "true" }),
-    live ? `Watching about ${num(h.median_buses)} buses live · last checked ${time(h.last_poll)}`
+    live ? `Tracking Sheffield’s buses live · last checked ${time(h.last_poll)}`
          : h.last_poll ? `Last checked ${time(h.last_poll)}` : "Not collecting yet",
   );
 }
@@ -227,7 +240,7 @@ function modelTable(m) {
   box.replaceChildren(
     el("p", {}, `Trained on ${day(m.train_days[0])}–${day(m.train_days[1])}, tested on later days it never saw (${day(m.test_days[0])}–${day(m.test_days[1])}, ${num(m.n_test)} trips).`),
     el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Method"), el("th", { class: "n" }, "Ghosts caught in riskiest 10%"), el("th", { class: "n" }, "Ranking (AUC)"), el("th", { class: "n" }, "Brier (lower is better)"))),
-      el("tbody", {}, ...rows.map(([n, x]) => el("tr", {}, el("td", {}, n), el("td", { class: "n" }, pct(x.ghosts_in_riskiest_10pct, 0)), el("td", { class: "n" }, x.roc_auc ?? "–"), el("td", { class: "n" }, x.brier))))));
+      el("tbody", {}, ...rows.map(([n, x]) => el("tr", {}, el("td", {}, n), el("td", { class: "n" }, pct(x.ghosts_in_riskiest_10pct, 0)), el("td", { class: "n" }, x.roc_auc == null ? "–" : Number(x.roc_auc).toFixed(2)), el("td", { class: "n" }, x.brier == null ? "–" : Number(x.brier).toFixed(4)))))));
 }
 
 main();
