@@ -144,7 +144,10 @@ def refresh_health():
     """Cheap update after each collector run: keep the published summary as it
     is, but refresh the live-feed health so the site shows collection is live."""
     path = C.SITE_DATA / "summary.json"
-    summary = json.loads(path.read_text()) if path.exists() else {"status": "collecting", "city": C.CITY}
+    try:
+        summary = json.loads(path.read_text())
+    except (OSError, ValueError):  # missing or damaged: start a fresh one, the daily job fills the rest
+        summary = {"status": "collecting", "city": C.CITY}
     summary["health"] = health_summary()
     summary["updated"] = datetime.now(C.TZ).isoformat(timespec="minutes")
     _w("summary.json", summary)
