@@ -1,0 +1,1 @@
+{"day": "2026-11-08", "model_version": "1", "psi": {"hour": 0.0007, "weekday": 0.6948, "headway_min": 0.0064, "duration_min": 0.001, "n_stops": 0.0004, "route_rate_7d": 0.0028, "route_hour_rate_14d": 0.0053, "dep_rate_14d": 0.0018, "op_rate_7d": 0.0271}, "psi_max": 0.6948}

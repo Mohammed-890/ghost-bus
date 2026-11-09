@@ -6,3 +6,4 @@
 {"action": "skip", "reason": "still collecting", "days": 5, "ghosts": 342, "day": "2026-11-06"}
 {"action": "skip", "reason": "still collecting", "days": 6, "ghosts": 460, "day": "2026-11-07"}
 {"triggers": ["no champion yet"], "test_days": ["2026-11-06", "2026-11-07"], "challenger_brier": 0.02108, "baseline_brier": 0.02347, "promoted": true, "reason": "challenger Brier 0.02108 vs baseline 0.02347", "action": "promoted", "version": "1", "day": "2026-11-08"}
+{"action": "keep", "reason": "not enough unseen days to compare fairly", "triggers": ["data drift (weekday PSI 0.69)"], "champion": "1", "day": "2026-11-09"}
