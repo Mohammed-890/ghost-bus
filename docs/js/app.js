@@ -36,7 +36,8 @@ async function liveNow() {
       .bindTooltip(route ? `Route ${route}` : "Bus (no route reported)").addTo(map);
     pts.push([lat, lon]);
   }
-  if (pts.length > 3) map.fitBounds(pts, { padding: [24, 24], maxZoom: 13 });
+  // size the map only once the section is laid out, otherwise Leaflet zooms out to the whole region
+  requestAnimationFrame(() => { map.invalidateSize(); if (pts.length > 3) map.fitBounds(pts, { padding: [24, 24], maxZoom: 13 }); });
 }
 
 async function main() {
@@ -200,7 +201,7 @@ function drawMap(routes, shapes) {
     pl.on("click", () => { $("#route-select").value = r.id; showRoute(r.id); $("#check").scrollIntoView(); });
     bounds.push(...s.path);
   }
-  if (bounds.length) map.fitBounds(bounds, { padding: [20, 20] });
+  requestAnimationFrame(() => { map.invalidateSize(); if (bounds.length) map.fitBounds(bounds, { padding: [20, 20] }); });
 }
 const mix = (a, b, k) => `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * k)).join(",")})`;
 

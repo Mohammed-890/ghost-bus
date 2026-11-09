@@ -134,5 +134,5 @@ caption { text-align: left; color: var(--muted); font-size: .9rem; padding-botto
 @media (max-width: 640px) { .now-map { height: 320px; } }
 
 /* map tiles: OpenStreetMap, inverted for dark mode */
-.tiles-dark { filter: invert(1) hue-rotate(180deg) brightness(.9) contrast(.85) saturate(.6); }
+.tiles-dark { filter: invert(1) hue-rotate(180deg) brightness(.75) contrast(.9) saturate(.35); }
 .leaflet-container { background: var(--paper); }
