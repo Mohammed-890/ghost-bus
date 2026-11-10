@@ -1,1 +1,1 @@
-{"route":"626","operator":"TM Travel","id":"626-tm-travel","by_hour":[[7,5,0]],"departures":[{"direction_id":"0","from_stop":"Crystal Peaks/CP3","to_stop":"Walford Road","days":5,"ghosts":0,"p_runs_next":0.992,"time":"07:22"}]}
+{"route":"626","operator":"TM Travel","id":"626-tm-travel","by_hour":[[7,6,0]],"departures":[{"direction_id":"0","from_stop":"Crystal Peaks/CP3","to_stop":"Walford Road","days":6,"ghosts":0,"p_runs_next":0.992,"time":"07:22"}]}
