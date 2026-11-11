@@ -1,9 +1,9 @@
 # What Argo CD deploys. CI updates image tags here on every merge to main
 # (GitOps: the cluster follows Git, nobody runs kubectl apply by hand).
 image:
-  tag: "sha-f6153b6"
+  tag: "sha-2eeb7b8"
 mlflowImage:
-  tag: "sha-f6153b6"
+  tag: "sha-2eeb7b8"
 bods:
   existingSecret: ghost-bus-bods
 collector:
