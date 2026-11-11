@@ -23,7 +23,21 @@ const el = (tag, attrs = {}, ...kids) => {
   return n;
 };
 const get = (p) => fetch(`${DATA}/${p}`, { cache: "no-cache" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-const getLive = (p) => (LIVE ? fetch(`${LIVE}${p}?t=${Date.now()}`).then((r) => (r.ok ? r.json() : null)).catch(() => null) : Promise.resolve(null));
+// GitHub's raw file server caches a branch for 5 minutes, whatever the query string. So ask which commit
+// is the latest on the live branch (a conditional request, which doesn't use up the API's hourly allowance
+// when nothing changed), then fetch the files at that exact commit: a new address every update, never stale.
+let liveBase = null;
+async function resolveLive() {
+  if (!LIVE) return null;
+  const m = LIVE.match(/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\//);
+  if (!m) return LIVE;
+  try {
+    const r = await fetch(`https://api.github.com/repos/${m[1]}/${m[2]}/commits/${m[3]}`, { headers: { Accept: "application/vnd.github.sha" }, cache: "no-cache" });
+    if (r.ok) return `https://raw.githubusercontent.com/${m[1]}/${m[2]}/${(await r.text()).trim()}/`;
+  } catch { /* offline or rate-limited: fall back to the branch address */ }
+  return LIVE;
+}
+const getLive = (p) => (liveBase ? fetch(`${liveBase}${p}`).then((r) => (r.ok ? r.json() : null)).catch(() => null) : Promise.resolve(null));
 const num = (x) => (x ?? 0).toLocaleString("en-GB");
 const pct = (x, d = 1) => (x == null || Number.isNaN(x) ? "–" : `${(x * 100).toFixed(d)}%`);
 const slug = (s) => String(s).replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "route";
@@ -622,6 +636,7 @@ function setLive(s, v) {
   LIVEBY = new Map((S.live || []).map(([i, delay, pos, lat, lon, age, how]) => [i, { delay, pos, lat, lon, age, how }]));
 }
 async function loadLive() {
+  liveBase = await resolveLive();
   const [ls, lv, ss, sv] = await Promise.all([getLive("status.json"), getLive("vehicles.json"), get("status.json"), get("vehicles.json")]);
   const pick = (a, b) => (a && b ? (new Date(a.at) >= new Date(b.at) ? a : b) : a || b);
   const s = pick(ls, ss), v = pick(lv, sv) || { at: s?.at, v: [] };
@@ -658,7 +673,7 @@ async function main() {
   B = b; buildIndex(); setLive(...got);
   setupSearch(); freshness(); render(true);
   addEventListener("hashchange", () => render(true));
-  setInterval(refresh, 30000);
+  setInterval(refresh, 75000);   // the live branch updates every ~2 minutes
   setInterval(freshness, 15000);
   setInterval(() => render(), 60000);   // countdowns move on even between data updates
 }
