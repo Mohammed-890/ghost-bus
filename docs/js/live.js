@@ -79,7 +79,7 @@ function setupSearch() {
     q.setAttribute("aria-expanded", "true");
     q.setAttribute("aria-activedescendant", active >= 0 ? `q-${active}` : "");
   };
-  const choose = (it) => { q.value = it.label; close(); open(it.kind, it.key, true); };
+  const choose = (it) => { q.value = it.label; close(); q.blur(); open(it.kind, it.key); };
   q.addEventListener("input", () => { items = search(q.value); active = items.length ? 0 : -1; q.value.trim() ? paint() : close(); });
   q.addEventListener("keydown", (e) => {
     if (list.hidden) return;
@@ -88,14 +88,15 @@ function setupSearch() {
     else if (e.key === "Enter" && items[active]) { choose(items[active]); e.preventDefault(); }
     else if (e.key === "Escape") close();
   });
-  q.addEventListener("blur", () => setTimeout(close, 100));
+  q.addEventListener("focus", () => q.select());
+  q.addEventListener("blur", () => setTimeout(() => { close(); if (!q.value.trim() && current) q.value = current; }, 120));
 
-  const picks = ["Sheffield Interchange (all stands)", "Meadowhall Interchange (all stands)", "Arundel Gate (all stands)"]
+  const picks = ["Meadowhall Interchange (all stands)", "Arundel Gate (all stands)", "52-stagecoach-yorkshire", "Sheffield Interchange (all stands)"]
     .map((k) => index.find((it) => it.key === k)).filter(Boolean);
   if (picks.length) {
-    $("#try").replaceChildren("Try: ", ...picks.flatMap((it, i) => {
+    $("#try").replaceChildren("Try ", ...picks.flatMap((it, i) => {
       const b = el("button", { type: "button", class: "chip" }, it.label);
-      b.addEventListener("click", () => { q.value = it.label; open("stop", it.key, true); });
+      b.addEventListener("click", () => { q.value = it.label; open(it.kind, it.key); });
       return i ? [" ", b] : [b];
     }));
     $("#try").hidden = false;
@@ -141,7 +142,7 @@ function render() {
   if (!view || !B) return;
   const now = nowSecs(), live = liveOf();
   const list = $("#live-list");
-  let rows = [], pts = [], buses = [];
+  let rows = [], pts = [], buses = [], signRows = [];
   if (view.kind === "stop") {
     const it = index.find((x) => x.kind === "stop" && x.key === view.key);
     if (!it) return;
@@ -151,6 +152,7 @@ function render() {
     const early = all.filter((d) => d.secs < now - 300).reverse();
     tabs([["up", `Coming up (${up.length})`], ["early", `Earlier today (${early.length})`]]);
     const pick = view.tab === "early" ? early : up.slice(0, 60);
+    signRows = all;
     rows = pick.map((d) => rowFor(d.i, d.secs, now, live, multi ? `${B.routes[B.trips[d.i][0]][1]} · stand ${B.stops[d.stop][0].split("/").pop()}` : null));
     $("#live-kind").textContent = "Bus stop";
     $("#live-title").textContent = it.label;
@@ -171,6 +173,7 @@ function render() {
     const mine = trips.filter(([t]) => t[1] === view.tab).sort((a, b) => a[0][2] - b[0][2]);
     const next = mine.findIndex(([t]) => t[2] >= now - 300);
     rows = mine.map(([t, i]) => rowFor(i, t[2], now, live, `from ${t[4]}`));
+    signRows = mine.map(([t, i]) => ({ i, secs: t[2] }));
     $("#live-kind").textContent = r.sub;
     $("#live-title").textContent = r.label;
     const ran = trips.filter(([, i]) => "RO".includes(S.status[i])).length, ghost = trips.filter(([, i]) => S.status[i] === "G").length;
@@ -183,6 +186,27 @@ function render() {
   }
   list.replaceChildren(...rows);
   drawLive(view.kind, pts, buses);
+  sign(signRows, now, live);
+}
+
+// the LED sign: the next buses, plus any that should have come in the last half hour and didn't
+const narrow = () => matchMedia("(max-width: 600px)").matches;
+const shortStop = (name) => { const m = (name || "").match(BAY); return m ? m[1] : name || ""; };
+function sign(items, now, live) {
+  const ghosts = items.filter((d) => S.status[d.i] === "G" && d.secs < now && d.secs >= now - 1800).slice(-2);
+  const next = items.filter((d) => d.secs >= now - 60 && S.status[d.i] !== "G").slice(0, 7 - ghosts.length);
+  const show = [...ghosts, ...next].sort((a, b) => a.secs - b.secs);
+  const rows = show.map((d) => {
+    const t = B.trips[d.i], c = S.status[d.i];
+    const mins = Math.round((d.secs - now) / 60);
+    const when = c === "G" ? "Ghost" : mins <= 0 ? "Due" : mins < 60 ? `${mins} min` : hhmm(d.secs);
+    const label = c === "G" ? `Route ${B.routes[t[0]][0]} to ${shortStop(t[5])}, due ${hhmm(d.secs)}: never came`
+      : `Route ${B.routes[t[0]][0]} to ${shortStop(t[5])}, ${mins <= 0 ? "due now" : `in ${mins} minutes`}${c === "O" ? ", tracked live" : ""}`;
+    return el("li", { class: `sign-row${c === "G" ? " ghost" : ""}${c === "O" && live.has(d.i) ? " live" : ""}`, "aria-label": label },
+      el("span", { class: "rt" }, B.routes[t[0]][0]), el("span", { class: "dest" }, narrow() ? shortStop(t[5]).split("/")[0] : shortStop(t[5])), el("span", { class: "when" }, when));
+  });
+  if (!rows.length) rows.push(el("li", { class: "sign-row" }, el("span", { class: "rt" }, ""), el("span", { class: "dest" }, "No more buses today"), el("span", { class: "when" }, "")));
+  $("#sign-rows").replaceChildren(...rows);
 }
 
 function nowFromAt() {
@@ -218,7 +242,7 @@ function drawLive(kind, pts, buses) {
   }
   for (const [i, b] of buses) {
     const t = B.trips[i];
-    L.circleMarker([b.lat, b.lon], { radius: 7, weight: 2, color: dark ? "#10151B" : "#fff", fillColor: "#2E9A5E", fillOpacity: 1 })
+    L.circleMarker([b.lat, b.lon], { radius: 7, weight: 2, color: "#0C0D0B", fillColor: "#FFB31A", fillOpacity: 1 })
       .bindTooltip(`Route ${B.routes[t[0]][0]} to ${t[5]}, due ${hhmm(t[2])} · seen ${b.age} min ago`).addTo(layer);
   }
   const all = [...pts.map((p) => [p[1], p[2]]), ...buses.map(([, b]) => [b.lat, b.lon])];
@@ -229,15 +253,25 @@ function drawLive(kind, pts, buses) {
   });
 }
 
-function open(kind, key, scroll) {
+let current = "";
+function open(kind, key, quiet) {
   view = { kind, key, tab: kind === "stop" ? "up" : null };
+  const it = index.find((x) => x.kind === kind && x.key === key);
+  current = it ? it.label : "";
+  $("#q").value = current;
   $("#live").hidden = false;
   render();
-  history.replaceState(null, "", kind === "stop" ? `?stop=${encodeURIComponent(key)}` : `?line=${key}`);
-  if (scroll) $("#live").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  if (!quiet) history.replaceState(null, "", kind === "stop" ? `?stop=${encodeURIComponent(key)}` : `?line=${key}`);
+}
+
+function clock() {
+  const t = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(new Date());
+  $("#sign-clock").replaceChildren(t.slice(0, 5), el("span", { class: "sec" }, t.slice(5)));
 }
 
 function today() {
+  const c0 = S.counts || {};
+  $("#ticker").textContent = `Sheffield today: ${num((c0.R || 0) + (c0.O || 0))} buses ran · ${num(c0.G || 0)} never came · ${num((S.live || []).length)} on the road now · times are UK time · updated ${hhmm(nowFromAt())}`;
   const c = S.counts || {};
   const live = (S.live || []).length;
   $("#today").replaceChildren(
@@ -270,10 +304,12 @@ async function main() {
   buildIndex();
   setupSearch();
   today();
-  $("#live-close").addEventListener("click", () => { $("#live").hidden = true; view = null; history.replaceState(null, "", location.pathname); $("#q").focus(); });
   const qs = new URLSearchParams(location.search);
   if (qs.get("stop") && index.some((x) => x.kind === "stop" && x.key === qs.get("stop"))) open("stop", qs.get("stop"));
   else if (qs.get("line") && index.some((x) => x.kind === "route" && x.key === qs.get("line"))) open("route", qs.get("line"));
+  else open("stop", "Sheffield Interchange (all stands)", true);   // the sign is never blank: start at the city's main bus station
+  clock();
+  setInterval(clock, 1000);
   setInterval(refresh, 120000);
   setInterval(render, 30000);
 }
