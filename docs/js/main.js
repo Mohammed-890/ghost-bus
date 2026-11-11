@@ -7,7 +7,7 @@
 //   summary.json, routes.json, routes/<id>.json, recent_ghosts.json, shapes.json, model.json, monitoring.json
 // The two live files come from the `live` branch (updated every ~2 minutes); the copies on the site
 // (updated every ~13 minutes) are the fallback.
-import { createAssistant } from "./assistant.js?v=10";
+import { createAssistant } from "./assistant.js?v=11";
 
 const qs = new URLSearchParams(location.search);
 const DATA = qs.get("data") || "data";
@@ -196,6 +196,52 @@ function tabs(items, active, onPick) {
 function section(title, ...kids) { return el("section", { class: "sec" }, title ? el("h3", {}, title) : null, ...kids); }
 function stat(value, label, cls) { return el("div", { class: `stat ${cls || ""}` }, el("b", {}, value), el("span", {}, label)); }
 
+// ---------------------------------------------------------------- will it come? (warn before people wait)
+// The big complaint about bus apps: "live" times that are really the timetable, and buses that vanish or
+// never arrive with no warning. So every upcoming departure gets checked for signs it won't turn up.
+let riskCache = { at: null };
+function riskFacts() {
+  if (riskCache.at === S.at && riskCache.day === B.day) return riskCache;
+  const now = nowSecs(), ghosts2h = new Map(), reporting = new Set();
+  B.trips.forEach((t, i) => { if (st(i) === "G" && t[3] >= now - 7200) ghosts2h.set(t[0], (ghosts2h.get(t[0]) || 0) + 1); });
+  for (const [i] of S.live || []) reporting.add(routeOf(i)[1]);
+  riskCache = { at: S.at, day: B.day, ghosts2h, reporting };
+  return riskCache;
+}
+function riskOf(i) {
+  const c = st(i);
+  if (c !== "S" && c !== "P") return null;
+  const t = trip(i), now = nowSecs(), r = routeOf(i), h = RI[slug(`${r[0]}-${r[1]}`)], f = riskFacts();
+  const why = []; let score = 0;
+  const late = Math.round((now - t[2]) / 60);
+  if (c === "P" && late >= 8 && f.reporting.has(r[1])) { score += 3; why.push(`no bus has started it: it was due to leave ${shortStop(t[4])} ${late} min ago, and ${r[1]}’s other buses are being tracked`); }
+  const g = f.ghosts2h.get(t[0]) || 0;
+  if (g >= 2) { score += 2; why.push(`${g} buses on route ${r[0]} didn’t turn up in the last 2 hours`); }
+  else if (g === 1) { score += 1; why.push(`a bus on route ${r[0]} didn’t turn up in the last 2 hours`); }
+  if (h && h.judged >= 30 && h.rate >= 0.08) { score += h.rate >= 0.15 ? 2 : 1; why.push(`route ${r[0]} missed ${pct(h.rate, 0)} of its buses over the days checked`); }
+  return score >= 3 ? { level: "high", why } : score >= 2 ? { level: "medium", why } : null;
+}
+// the next bus that would do instead: same route from the same stop (any stand), or any bus to the same place
+function backupFor(i, stopIdx, afterSecs) {
+  const base = shortStop(B.stops[stopIdx][0]), ri = trip(i)[0], dest = shortStop(trip(i)[5]);
+  let same = null, other = null;
+  B.trips.forEach((t, j) => {
+    if (j === i || st(j) === "G" || st(j) === "R") return;
+    const s0 = t[6];
+    for (let k = 0; k < s0.length - 2; k += 2) {
+      if (shortStop(B.stops[s0[k]][0]) !== base) continue;
+      const secs = t[2] + s0[k + 1] * 60, ex = expected(j, k / 2, secs);
+      if (ex.passed || ex.secs <= afterSecs) break;
+      const cand = { j, secs: ex.secs, k: k / 2, raw: secs };
+      if (t[0] === ri) { if (!same || cand.secs < same.secs) same = cand; }
+      else if (shortStop(t[5]) === dest && (!other || cand.secs < other.secs)) other = cand;
+      break;
+    }
+  });
+  return same || other;
+}
+const ageText = (L) => { const m = Math.round(((L?.age || 0) + Math.max(0, (Date.now() - new Date(S.at).getTime()) / 1000)) / 60); return m <= 1 ? "just now" : `${m} min ago`; };
+
 // one departure row, used by stops, routes and lists
 function depRow(i, secs, k, now, extra) {
   const c = st(i), L = live(i), ex = expected(i, k, secs);
@@ -208,10 +254,14 @@ function depRow(i, secs, k, now, extra) {
   else { big = hhmm(secs); small = c === "R" ? "ran" : ""; }
   // under the destination: where the bus is and how late, for buses on the road; otherwise operator / stand
   const sub = c === "O" ? `${delayText(L?.delay)}${ex.live && L.delay ? ` (timetabled ${hhmm(secs)})` : ""} · ${whereIs(i)}` : extra || routeOf(i)[1];
-  const note = c === "O" ? (L?.how === "i" ? "matched by position" : "bus reports trip")
-    : c === "S" && reliab(i) != null ? `usually runs ${Math.round(reliab(i) * 100)}%`
-    : c === "P" ? "no bus found yet" : c === "R" ? "a bus was seen" : c === "G" ? "no bus seen" : c === "N" ? "not reporting" : "";
-  return el("a", { class: `dep ${STATUS[c][0]}${ex.passed || (secs < now - 300 && c !== "O") ? " past" : ""}`, href: `#/trip/${i}` },
+  // say plainly where each time comes from: a bus's GPS, or only the timetable
+  const risk = ex.passed ? null : riskOf(i);
+  const note = risk ? (risk.level === "high" ? "⚠ may not come" : "⚠ unreliable lately")
+    : c === "O" ? `GPS · seen ${ageText(L)}`
+    : c === "S" ? `timetable${reliab(i) != null ? ` · runs ${Math.round(reliab(i) * 100)}%` : ""}`
+    : c === "P" ? "timetable · no bus seen yet" : c === "R" ? "a bus was seen" : c === "G" ? "no bus seen" : c === "N" ? "not reporting" : "";
+  const label = `${routeOf(i)[0]} to ${headsign(i)}, ${big}${small ? ` (${small})` : ""}. ${STATUS[c][1]}. ${note}`;
+  return el("a", { class: `dep ${STATUS[c][0]}${ex.passed || (secs < now - 300 && c !== "O") ? " past" : ""}${risk ? ` risk-${risk.level}` : ""}`, href: `#/trip/${i}`, "aria-label": label, title: risk ? risk.why.join("; ") : null },
     el("span", { class: "when" }, el("b", { class: c === "O" ? `live ${delayClass(L?.delay)}` : "" }, big), el("small", {}, small)),
     badge(i),
     el("span", { class: "dest" }, el("b", {}, headsign(i)), el("small", { title: sub }, sub)),
@@ -282,8 +332,78 @@ function toast(msg, loud) {
   setTimeout(() => t.remove(), loud ? 30000 : 6000);
 }
 
-// ---------------------------------------------------------------- views
 const VIEWS = {};
+
+// ---------------------------------------------------------------- home & work, read aloud
+const places = () => store.get("gb:places", {});
+function placeButton(key, label) {
+  const p = places(), now0 = p.home?.key === key ? "home" : p.work?.key === key ? "work" : null;
+  const b = el("select", { class: "icon-btn place", "aria-label": "Save this stop as home or work" },
+    el("option", { value: "" }, now0 ? `★ Your ${now0}` : "Set as home/work"), el("option", { value: "home" }, "Set as home"), el("option", { value: "work" }, "Set as work"),
+    now0 ? el("option", { value: "clear" }, `Remove as ${now0}`) : null);
+  b.addEventListener("change", () => {
+    const q = places();
+    if (b.value === "home" || b.value === "work") { q[b.value] = { key, label }; toast(`${shortStop(label)} saved as your ${b.value}.`); }
+    else if (b.value === "clear" && now0) delete q[now0];
+    store.set("gb:places", q); render();
+  });
+  return b;
+}
+function speakButton(text) {
+  if (!("speechSynthesis" in window)) return null;
+  return el("button", { type: "button", class: "icon-btn", onclick: () => { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text()); u.lang = "en-GB"; speechSynthesis.speak(u); } }, "🔊 Read aloud");
+}
+function spokenStop(it, up) {
+  const now = nowSecs();
+  const parts = up.slice(0, 4).map((d) => {
+    const ex = expected(d.i, d.k, d.secs), m = Math.round((ex.secs - now) / 60), L0 = live(d.i), rk = riskOf(d.i);
+    return `Route ${routeOf(d.i)[0]} to ${headsign(d.i).replace(/\//g, " ")}, ${m <= 0 ? "due now" : `in ${m} minutes`}${L0 ? `, tracked by GPS, ${delayText(L0.delay)}` : ", timetable only"}${rk?.level === "high" ? ". Warning: it may not come" : ""}.`;
+  });
+  return parts.length ? `Next buses from ${it.label}. ${parts.join(" ")}` : `No more buses from ${it.label} today.`;
+}
+
+// ---------------------------------------------------------------- journey planner
+VIEWS.plan = (fromKey, toKey) => {
+  const fromIt = fromKey ? findItem("stop", fromKey) : null, toIt = toKey ? findItem("stop", toKey) : null;
+  const field = (id, label, it, other, which) => {
+    const input = el("input", { id, type: "search", autocomplete: "off", placeholder: label, value: it ? it.label : "", "aria-label": label });
+    const list = el("ul", { class: "q-list", role: "listbox", hidden: true });
+    input.addEventListener("input", () => {
+      const hits = search(input.value).filter((x) => x.kind === "stop").slice(0, 7);
+      list.replaceChildren(...hits.map((h) => { const li = el("li", { role: "option" }, el("span", { class: "tag" }, "Stop"), el("b", {}, h.label), el("small", {}, h.sub));
+        li.addEventListener("mousedown", (e) => { e.preventDefault(); location.hash = which === "from" ? `#/plan/${encodeURIComponent(h.key)}/${encodeURIComponent(other || "")}` : `#/plan/${encodeURIComponent(other || "")}/${encodeURIComponent(h.key)}`; });
+        return li; }));
+      list.hidden = !hits.length;
+    });
+    input.addEventListener("blur", () => setTimeout(() => (list.hidden = true), 150));
+    return el("div", { class: "plan-field" }, el("label", { for: id }, which === "from" ? "From" : "To"), el("div", { class: "search-box" }, input, list));
+  };
+  const p = places();
+  const quick = el("div", { class: "chips" },
+    el("button", { type: "button", class: "chip quiet", onclick: () => locateFrom(toKey) }, "📍 From where I am"),
+    p.home ? el("a", { class: "chip quiet", href: `#/plan/${encodeURIComponent(fromKey || "")}/${encodeURIComponent(p.home.key)}` }, "To home") : null,
+    p.work ? el("a", { class: "chip quiet", href: `#/plan/${encodeURIComponent(fromKey || "")}/${encodeURIComponent(p.work.key)}` }, "To work") : null,
+    fromKey || toKey ? el("a", { class: "chip quiet", href: `#/plan/${encodeURIComponent(toKey || "")}/${encodeURIComponent(fromKey || "")}` }, "⇅ Swap") : null);
+  let result = null;
+  if (fromIt && toIt) {
+    if (fromIt.key === toIt.key) result = el("p", { class: "muted" }, "That’s the same stop.");
+    else { const a = bot.plan(fromIt, toIt); result = el("div", { class: "plan-result" }, answerNodes(a)); }
+  } else result = el("p", { class: "muted" }, "Pick where you’re starting and where you’re going. Plans use live bus positions, so late buses are taken into account, and skip any bus that looks like it won’t come. One change is allowed, including a short walk between nearby stops.");
+  if (map && fromIt && toIt) { ctxLayer.clearLayers(); for (const s0 of [...fromIt.stops, ...toIt.stops]) { const q = B.stops[s0]; L.circleMarker([q[1], q[2]], { radius: 8, color: ink(), weight: 3, fillColor: "#fff", fillOpacity: 1 }).bindTooltip(q[0]).addTo(ctxLayer); }
+    if (!current.fitted) { fit([...fromIt.stops, ...toIt.stops].map((s0) => [B.stops[s0][1], B.stops[s0][2]]), 14); current.fitted = true; } drawVehicles(new Set()); }
+  return [el("div", { class: "head" }, el("p", { class: "kicker" }, "Journey planner"), el("h2", {}, "Plan a bus journey")),
+    el("div", { class: "plan-form" }, field("plan-from", "Starting stop", fromIt, toKey, "from"), field("plan-to", "Destination stop", toIt, fromKey, "to")), quick, result];
+};
+function locateFrom(toKey) {
+  if (!navigator.geolocation) return toast("Your browser can’t share your location.");
+  toast("Finding your nearest stop…");
+  navigator.geolocation.getCurrentPosition((pos) => {
+    const near = nearestStops(pos.coords.latitude, pos.coords.longitude, 1)[0];
+    if (near) location.hash = `#/plan/${encodeURIComponent(near.name)}/${encodeURIComponent(toKey || "")}`;
+  }, () => toast("Location is blocked. Type your stop instead."), { timeout: 10000 });
+}
+
+// ---------------------------------------------------------------- views
 let current = { kind: "home" };
 
 VIEWS.home = () => {
@@ -293,7 +413,7 @@ VIEWS.home = () => {
   const f = S.feed || {};
   const header = el("div", { class: "intro" },
     el("h1", {}, "Is your bus actually coming?"),
-    el("p", {}, "Live times for every bus in Sheffield, checked against the buses’ own GPS. See where your bus is, how late it’s running, and which buses never turned up at all."));
+    el("p", {}, "Live times for every bus in Sheffield, from every operator, checked against the buses’ own GPS. Each time says whether a real bus is tracked or it’s only the timetable, and you’re warned when a bus looks like it won’t come."));
   const stats = el("div", { class: "stats" },
     stat(num(f.buses ?? V?.v?.length), "buses on the road now", "live"),
     stat(f.buses ? pct(((f.reported || 0) + (f.inferred || 0)) / f.buses, 0) : "–", "matched to their timetabled trip"),
@@ -324,7 +444,13 @@ VIEWS.home = () => {
     : el("p", { class: "muted" }, "No routes with problems right now."));
   const ask = el("button", { type: "button", class: "ask-card", onclick: () => openChat() },
     el("b", {}, "Not sure? Just ask."), el("span", {}, "“When’s the next 52 from Arundel Gate?” · “How do I get to Meadowhall?”"));
-  return [header, ask, stats, fav, recent, popular, alertSec, ghostSec, lateSec, legendNote()];
+  const pl = places();
+  const trips0 = el("div", { class: "chips" },
+    el("a", { class: "chip", href: "#/plan" }, "Plan a journey"),
+    pl.home ? el("a", { class: "chip quiet", href: `#/plan//${encodeURIComponent(pl.home.key)}` }, "🏠 Take me home") : null,
+    pl.work ? el("a", { class: "chip quiet", href: `#/plan//${encodeURIComponent(pl.work.key)}` }, "💼 To work") : null,
+    pl.home ? null : el("span", { class: "muted small" }, "Open your stop and choose “Set as home” for one-tap journeys."));
+  return [header, ask, stats, section("Journeys", trips0), fav, recent, popular, alertSec, ghostSec, lateSec, legendNote()];
 };
 
 function legendNote() {
@@ -356,7 +482,9 @@ VIEWS.stop = (key, sub) => {
     el("p", { class: "kicker" }, multi ? `Bus station · ${it.stops.length} stands` : "Bus stop"),
     el("h2", {}, it.label),
     el("p", { class: "muted" }, `${num(all.length)} buses timetabled here today · ${num(ran)} ran so far · `, el("span", { class: "g" }, `${num(gh)} never came`)),
-    el("div", { class: "actions" }, favButton("stop", key, it.label), shareButton()));
+    el("div", { class: "actions" }, favButton("stop", key, it.label), shareButton(), speakButton(() => spokenStop(it, up)),
+      el("a", { class: "icon-btn", href: `#/plan/${encodeURIComponent(key)}` }, "Plan from here"),
+      el("a", { class: "icon-btn", href: `#/plan//${encodeURIComponent(key)}` }, "Plan to here"), placeButton(key, it.label)));
   const chips = routesHere.length > 1 ? el("div", { class: "chips filter" }, el("button", { type: "button", class: `chip${filter ? " quiet" : ""}`, onclick: () => { current.filter = null; render(); } }, "All routes"),
     routesHere.map((r) => el("button", { type: "button", class: `chip${filter === r ? "" : " quiet"}`, onclick: () => { current.filter = filter === r ? null : r; render(); } }, r))) : null;
   const seg = tabs([["next", `Next buses (${up.length})`], ["earlier", `Earlier today (${early.length})`], ["stats", "Stop stats"]], tab, (k) => { location.hash = `${href("stop", key)}/${k}`; });
@@ -366,6 +494,14 @@ VIEWS.stop = (key, sub) => {
     const list = tab === "earlier" ? early : up.slice(0, 80);
     body = list.length ? el("div", { class: "list" }, list.map((d) => depRow(d.i, d.secs, d.k, now, extra(d))))
       : el("p", { class: "muted" }, tab === "earlier" ? "Nothing earlier today." : "No more buses from here today.");
+    if (tab !== "earlier") {
+      const firstRisky = up.slice(0, 6).find((d) => riskOf(d.i)?.level === "high");
+      if (firstRisky) {
+        const bk = backupFor(firstRisky.i, firstRisky.stop, expected(firstRisky.i, firstRisky.k, firstRisky.secs).secs);
+        body = el("div", {}, el("div", { class: "riskbox high" }, el("p", {}, el("b", {}, `The ${hhmm(firstRisky.secs)} ${routeOf(firstRisky.i)[0]} may not come. `),
+          riskOf(firstRisky.i).why[0], ".", bk ? el("span", {}, " Backup: ", el("a", { href: `#/trip/${bk.j}` }, `${routeOf(bk.j)[0]} at ${hhmm(bk.secs)}`), ".") : "")), body);
+      }
+    }
   }
   // map: the stop and the buses on their way to it
   const coming = new Set(up.slice(0, 30).map((d) => d.i).filter((i) => live(i)));
@@ -515,6 +651,17 @@ VIEWS.trip = (key) => {
     drawVehicles(new Set([i]));
     if (current.key !== key || !current.fitted) { fit(L0 ? [...pts, [L0.lat, L0.lon]] : pts, 15); current.fitted = true; }
   }
+  let riskBox = null;
+  const rk = riskOf(i);
+  if (rk || c === "G" || c === "P") {
+    const fromK = cs.findIndex((x) => x.secs >= now - 120);
+    const at = cs[Math.max(0, fromK)] || cs[0];
+    const bk = at ? backupFor(i, at.stop, Math.max(now, at.secs)) : null;
+    const lines = [];
+    if (rk) lines.push(el("p", {}, el("b", {}, rk.level === "high" ? "This bus may not come." : "This route has been unreliable lately."), ` ${rk.why.map((w) => w[0].toUpperCase() + w.slice(1)).join(". ")}.`));
+    if (bk) lines.push(el("p", {}, "Backup: ", el("a", { href: `#/trip/${bk.j}` }, `the ${routeOf(bk.j)[0]} to ${headsign(bk.j)} from ${shortStop(B.stops[at.stop][0])} at ${hhmm(bk.secs)}`), ` (${Math.max(0, Math.round((bk.secs - now) / 60))} min).`));
+    if (lines.length) riskBox = el("div", { class: `riskbox ${rk?.level || "info"}` }, lines);
+  }
   let remind = null;
   const ahead = cs.map((x, k) => ({ ...x, k })).filter((x) => { const ex = expected(i, x.k, x.secs); return !ex.passed && ex.secs > now + 300 && c !== "G" && c !== "R"; });
   if (ahead.length) {
@@ -523,7 +670,7 @@ VIEWS.trip = (key) => {
       const x = ahead.find((y) => String(y.k) === sel.value); if (x) addReminder(i, x.k, x.secs, B.stops[x.stop][0]); } }, "Tell me 5 min before")),
       el("p", { class: "muted small" }, "Uses the live position of the bus, so it adjusts if the bus is running late."));
   }
-  return [head, remind, section("Stops and times", tl), section("This departure on other days", histBox)];
+  return [head, riskBox, remind, section("Stops and times", tl), section("This departure on other days", histBox)];
 };
 
 VIEWS.network = () => {
@@ -739,6 +886,8 @@ const ctx = {
   get B() { return B; }, get S() { return S; }, get R() { return R; }, get RI() { return RI; }, get SUM() { return SUM; }, get index() { return index; },
   now: nowSecs, calls, live, expected, st, headsign, routeOf, reliab, whereIs, delayText, hhmm, shortStop, slug, pct, num, href, search,
   current: () => current,
+  places: () => places(),
+  risk: (i) => riskOf(i),
 };
 function md(text) {        // **bold** only
   const out = []; text.split(/(\*\*[^*]+\*\*)/).forEach((p) => out.push(p.startsWith("**") ? el("b", {}, p.slice(2, -2)) : p));
@@ -750,12 +899,15 @@ function say(who, ...kids) {
   m.scrollIntoView({ block: "end", behavior: reduced ? "auto" : "smooth" });
   return m;
 }
-function botAnswer(a) {
+function answerNodes(a, inChat) {
   const now = nowSecs();
   const parts = (a.say || []).map((p) => el("p", {}, md(p)));
-  if (a.rows?.length) parts.push(el("div", { class: "list mini" }, a.rows.map((r) => { const row = depRow(r.i, r.secs, r.k, now, r.extra); row.addEventListener("click", maybeCloseChat); return row; })));
-  if (a.actions?.length) parts.push(el("div", { class: "chat-actions" }, a.actions.map((x) => el("a", { class: "chip quiet", href: x.href, onclick: maybeCloseChat }, x.label))));
-  say("bot", ...parts);
+  if (a.rows?.length) parts.push(el("div", { class: "list mini" }, a.rows.map((r) => { const row = depRow(r.i, r.secs, r.k, now, r.extra); if (inChat) row.addEventListener("click", maybeCloseChat); return row; })));
+  if (a.actions?.length) parts.push(el("div", { class: "chat-actions" }, a.actions.map((x) => el("a", { class: "chip quiet", href: x.href, onclick: inChat ? maybeCloseChat : null }, x.label))));
+  return parts;
+}
+function botAnswer(a) {
+  say("bot", ...answerNodes(a, true));
   chips(a.chips || []);
 }
 function chips(list) {
@@ -809,6 +961,30 @@ function setupChat() {
   $("#chat-close").addEventListener("click", closeChat);
   $("#chat-form").addEventListener("submit", (e) => { e.preventDefault(); const q = $("#chat-q"); askBot(q.value); q.value = ""; });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#chat").hidden) closeChat(); });
+}
+
+// ---------------------------------------------------------------- full-screen map, easy view
+function setupViewModes() {
+  const app = $(".app");
+  if (window.L && map) {
+    const Full = L.Control.extend({ options: { position: "topleft" }, onAdd() {
+      const b = L.DomUtil.create("button", "map-btn"); b.type = "button"; b.textContent = "⤢ Full map"; b.setAttribute("aria-pressed", "false");
+      L.DomEvent.disableClickPropagation(b);
+      b.addEventListener("click", () => { const on = app.classList.toggle("mapfull"); b.textContent = on ? "☰ Show list" : "⤢ Full map"; b.setAttribute("aria-pressed", String(on)); setTimeout(() => map.invalidateSize(), 50); });
+      return b; } });
+    map.addControl(new Full());
+  }
+  const easy = $("#easy");
+  const apply = (on) => { document.body.classList.toggle("easy", on); easy.setAttribute("aria-pressed", String(on)); };
+  apply(store.get("gb:easy", false));
+  easy.addEventListener("click", () => { const on = !document.body.classList.contains("easy"); store.set("gb:easy", on); apply(on); });
+}
+
+// ---------------------------------------------------------------- offline
+function setupOffline() {
+  if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+  addEventListener("offline", () => toast(`You’re offline. Showing the last data${S ? ` from ${hhmm(atSecs(S.at))}` : ""}; it updates again when you reconnect.`, true));
+  addEventListener("online", () => { toast("Back online. Updating…"); refresh(); });
 }
 
 // ---------------------------------------------------------------- light / dark
@@ -866,7 +1042,7 @@ async function main() {
   const b = await get(`board/${got[0].day}.json`);
   if (!b) { $("#view").replaceChildren(el("p", {}, "Today’s timetable is still loading. Try again in a few minutes.")); return; }
   B = b; buildIndex(); setLive(...got);
-  setupSearch(); setupChat(); setupTheme(); freshness(); render(true);
+  setupSearch(); setupChat(); setupTheme(); setupViewModes(); setupOffline(); freshness(); render(true);
   if (qs.get("ask")) { openChat(); askBot(qs.get("ask")); }
   addEventListener("hashchange", () => render(true));
   setInterval(refresh, 75000);   // the live branch updates every ~2 minutes

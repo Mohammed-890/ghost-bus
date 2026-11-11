@@ -246,8 +246,10 @@ export function createAssistant(ctx) {
     const ex = ctx.expected(d.i, d.k, d.secs), L = ctx.live(d.i), c = ctx.st(d.i);
     const r = ctx.routeOf(d.i)[0];
     let s = `${withRoute ? `the **${r}** to ${ctx.headsign(d.i)} ` : ""}${whenText(ex.secs)}`;
-    if (c === "O" && L) s += L.delay > 1 ? ` (running ${L.delay} min late, timetabled ${ctx.hhmm(d.secs)})` : L.delay < -1 ? ` (${-L.delay} min early)` : " (on time, tracked live)";
-    else if (c === "P") s += " (should be on its way, not confirmed yet)";
+    if (c === "O" && L) s += L.delay > 1 ? ` (tracked by GPS, ${L.delay} min late, timetabled ${ctx.hhmm(d.secs)})` : L.delay < -1 ? ` (tracked by GPS, ${-L.delay} min early)` : " (tracked by GPS, on time)";
+    else if (ctx.risk?.(d.i)?.level === "high") s += ` (**may not come**: ${ctx.risk(d.i).why[0]})`;
+    else if (c === "P") s += " (timetable only, no bus seen on it yet)";
+    else s += " (timetable)";
     return s;
   }
   const extraFor = (it) => (d) => (it && it.stops.length > 1 ? `${ctx.routeOf(d.i)[1]} · stand ${ctx.B.stops[d.stop][0].split("/").pop()}` : ctx.routeOf(d.i)[1]);
@@ -504,7 +506,7 @@ export function createAssistant(ctx) {
     const direct = [], firstLeg = new Map(), cells = new Map();
     ctx.B.trips.forEach((t, i) => {
       const s = t[6]; let ka = -1, depA = 0;
-      if (ctx.st(i) === "G" || ctx.st(i) === "R") return;
+      if (ctx.st(i) === "G" || ctx.st(i) === "R" || ctx.risk?.(i)?.level === "high") return;
       for (let k = 0; k < s.length; k += 2) {
         const secs = t[2] + s[k + 1] * 60;
         if (ka < 0) {
@@ -667,7 +669,15 @@ export function createAssistant(ctx) {
     if (sc.near) return done({ say: ["Finding the stops closest to you…"], geo: true }, "near");
     if (memo.pendingTo && stop && !ris && !journey) return done(plan(stop, memo.pendingTo), "plan");
     if (journey) return done(plan(journey.from, journey.to), "plan");
-    if (dest?.home) return done({ say: [`I don’t know where your ${dest.home} is. Tell me the stop, for example “how do I get from Arundel Gate to Hillsborough”.`] }, "clarify");
+    if (dest?.home || /\b(take me|get me|go|going|get)\s+(back\s+)?(home|to work)\b/.test(t)) {
+      const which = /\bwork\b/.test(t) ? "work" : "home", saved = ctx.places?.()[which];
+      const target = saved && ctx.index.find((x) => x.kind === "stop" && x.key === saved.key);
+      if (!target) return done({ say: [`I don’t know where your ${which} is yet. Open your ${which} stop and choose “Set as ${which}”, or tell me the stop, for example “how do I get from Arundel Gate to Hillsborough”.`] }, "clarify");
+      const from = stop || (page?.kind === "stop" ? ctx.index.find((x) => x.kind === "stop" && x.key === page.key) : memo.stop);
+      if (from && from.key !== target.key) return done(plan(from, target), "plan");
+      memo.pendingTo = target;
+      return done({ say: [`Where are you now? Type your stop (or tap “Buses near me”) and I’ll plan the way to your ${which}, **${stopName(target)}**.`], chips: ["Buses near me"] }, "ask-from");
+    }
     if (dest?.to && !ris && memo.route && memo.focus !== "stop" && /\b(it|its|they|that one|this one)\b/.test(t)) return done(answerWhere(memo.route, dest.to), "where");
     if (dest?.to) {
       const from = page?.kind === "stop" ? ctx.index.find((x) => x.kind === "stop" && x.key === page.key) : memo.stop;
@@ -724,7 +734,8 @@ export function createAssistant(ctx) {
     return done({ ...HELP, say: ["I didn’t catch that. " + HELP.say[0], ...HELP.say.slice(1)] }, "fallback");
   }
 
+  function planKeys(a, b) { prepare(); return plan(a, b); }
   function nextFor(key) { prepare(); const it = ctx.index.find((x) => x.kind === "stop" && x.key === key); return it ? answerNext(it) : null; }
 
-  return { ask, nextFor, _debug: { findStop: (s) => { prepare(); return findStop(s)?.it?.label; }, findRoutes: (s) => { prepare(); return findRoutes(s); }, findTime, intentOf: (s) => intentOf(words(s).join(" ")) } };
+  return { ask, nextFor, plan: planKeys, _debug: { findStop: (s) => { prepare(); return findStop(s)?.it?.label; }, findRoutes: (s) => { prepare(); return findRoutes(s); }, findTime, intentOf: (s) => intentOf(words(s).join(" ")) } };
 }

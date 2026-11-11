@@ -309,3 +309,42 @@ body.chatting .chat-open { display: none; }
   .chat-open { right: 1rem; bottom: 1rem; padding: .75rem 1rem .75rem .85rem; font-size: .95rem; }
   .toasts { bottom: 5rem; }
 }
+
+/* ---------- will it come? ---------- */
+.dep.risk-high { box-shadow: inset 4px 0 0 var(--vlate); }
+.dep.risk-medium { box-shadow: inset 4px 0 0 var(--late); }
+.dep.risk-high .state small { color: var(--vlate); font-weight: 700; }
+.dep.risk-medium .state small { color: var(--late); font-weight: 700; }
+.riskbox { margin: .8rem 0; padding: .7rem .9rem; border-radius: 12px; font-size: .92rem; border: 1px solid; }
+.riskbox p { margin: 0 0 .3rem; } .riskbox p:last-child { margin: 0; }
+.riskbox.high { background: color-mix(in srgb, var(--vlate) 9%, var(--panel)); border-color: color-mix(in srgb, var(--vlate) 45%, transparent); }
+.riskbox.high b { color: var(--vlate); }
+.riskbox.medium, .riskbox.info { background: color-mix(in srgb, var(--late) 10%, var(--panel)); border-color: color-mix(in srgb, var(--late) 45%, transparent); }
+
+/* ---------- journey planner ---------- */
+.plan-form { display: grid; gap: .6rem; margin: .8rem 0; }
+.plan-field label { display: block; font-weight: 700; font-size: .85rem; margin-bottom: .25rem; }
+.plan-field input { padding-left: .9rem; }
+.plan-result { margin-top: 1rem; padding: .9rem 1rem; border: 1px solid var(--rule); border-radius: 12px; background: var(--soft); }
+.plan-result p { margin: 0 0 .5rem; }
+.actions select.place { appearance: none; padding-right: .9rem; }
+a.icon-btn { text-decoration: none; display: inline-flex; align-items: center; }
+
+/* ---------- map controls ---------- */
+.map-btn { font: 700 .85rem var(--font); padding: .5rem .8rem; border-radius: 10px; border: 1px solid var(--rule); background: var(--panel); color: var(--ink); cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, .2); }
+.app.mapfull, body.easy .app.mapfull { grid-template-columns: 1fr; }
+.app.mapfull .panel { display: none; }
+@media (max-width: 899px) { .app.mapfull .mapwrap { height: 100dvh; position: fixed; inset: 0; z-index: 2000; } }
+
+/* ---------- easy view: bigger, plainer, higher contrast ---------- */
+body.easy { font-size: 19px; }
+body.easy .muted, body.easy .dep small, body.easy .stat span { color: var(--ink); }
+body.easy .dep { grid-template-columns: 5rem 3.4rem minmax(0, 1fr); padding: .8rem .4rem; }
+body.easy .dep .when b { font-size: 1.35rem; }
+body.easy .dep .state { grid-column: 3; flex-direction: row; align-items: center; gap: .5rem; text-align: left; max-width: none; }
+body.easy .dep .dest b, body.easy .dep .dest small { white-space: normal; }
+body.easy .rt { font-size: 1.05rem; }
+body.easy .pill { font-size: .9rem; }
+body.easy .app { grid-template-columns: minmax(420px, 560px) 1fr; }
+#easy[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+#easy { font-weight: 700; font-size: .85rem; }

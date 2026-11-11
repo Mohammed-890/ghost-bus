@@ -15,7 +15,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icon.svg">
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-  <link rel="stylesheet" href="css/app.css?v=10">
+  <link rel="stylesheet" href="css/app.css?v=11">
 </head>
 <body>
   <a class="skip" href="#view">Skip to content</a>
@@ -25,11 +25,13 @@
         <a class="brand" href="#/"><span class="mark" aria-hidden="true"></span><span>Ghost Bus<small>Sheffield</small></span></a>
         <span class="top-right">
           <span class="fresh" id="fresh"><i aria-hidden="true"></i><span>Live · </span><b id="fresh-age">connecting…</b></span>
+          <button type="button" class="theme" id="easy" aria-pressed="false" aria-label="Easy view: larger text" title="Easy view: larger text">Aa</button>
           <button type="button" class="theme" id="theme" aria-label="Theme">◐</button>
         </span>
       </header>
       <nav class="nav" aria-label="Sections">
         <a href="#/" data-v="home">Live</a>
+        <a href="#/plan" data-v="plan">Plan</a>
         <a href="#/network" data-v="network">Network</a>
         <a href="#/reliability" data-v="reliability">Reliability</a>
         <a href="#/about" data-v="about">How it works</a>
@@ -76,6 +78,6 @@
   </section>
   <div class="toasts" id="toasts" aria-live="assertive"></div>
   <script src="vendor/leaflet/leaflet.js"></script>
-  <script src="js/main.js?v=10" type="module"></script>
+  <script src="js/main.js?v=11" type="module"></script>
 </body>
 </html>
