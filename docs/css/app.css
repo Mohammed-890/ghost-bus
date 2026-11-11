@@ -330,6 +330,39 @@ body.chatting .chat-open { display: none; }
 .actions select.place { appearance: none; padding-right: .9rem; }
 a.icon-btn { text-decoration: none; display: inline-flex; align-items: center; }
 
+/* ---------- planner options ---------- */
+.plan-when { display: flex; gap: .5rem; }
+.plan-when select, .plan-when input, .jc-controls select, .jc-controls input { font: inherit; font-size: .9rem; padding: .45rem .6rem; border-radius: 10px; border: 1.5px solid var(--rule); background: var(--panel); color: var(--ink); }
+.plan-when select { flex: 1; }
+.save-j { margin: .2rem 0 .8rem; }
+.save-j[aria-pressed="true"] { border-color: var(--brand); color: var(--brand); }
+.options { display: grid; gap: .8rem; margin-top: .6rem; }
+.option { border: 1px solid var(--rule); border-radius: 14px; padding: .85rem .9rem .6rem; background: var(--panel); }
+.option.best { border: 2px solid var(--brand); }
+.opt-tags { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .45rem; }
+.opt-tag { font-size: .78rem; font-weight: 700; padding: .12rem .55rem; border-radius: 999px; background: var(--brand-soft); color: var(--brand); }
+.opt-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem .8rem; }
+.opt-times { font-size: 1.35rem; }
+.opt-head span { color: var(--muted); font-size: .9rem; }
+.opt-head .opt-p { margin-left: auto; color: var(--ink); font-weight: 700; }
+.opt-leave { margin: .2rem 0 .4rem; font-weight: 700; color: var(--live); }
+.opt-why { margin: .5rem 0 0; padding-left: 1.1rem; font-size: .9rem; }
+.opt-why li { margin: .15rem 0; }
+.opt-why li.warn { color: var(--late); list-style: none; margin-left: -1.1rem; }
+.small { font-size: .82rem; }
+
+/* ---------- saved journeys ---------- */
+.jcards { display: grid; gap: .6rem; }
+.jcard { border: 1px solid var(--rule); border-radius: 14px; padding: .7rem .85rem; background: var(--soft); }
+.jc-title { font-weight: 700; color: var(--ink); text-decoration: none; }
+.jc-title:hover { color: var(--brand); }
+.jc-line { margin: .35rem 0 .1rem; display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; }
+.jc-state { display: block; color: var(--muted); }
+.jc-state.late, .jc-state.vlate { color: var(--late); }
+.jc-state.ontime { color: var(--live); }
+.jc-controls { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-top: .5rem; }
+.jc-controls .icon-btn { margin-left: auto; }
+
 /* ---------- map controls ---------- */
 .map-btn { font: 700 .85rem var(--font); padding: .5rem .8rem; border-radius: 10px; border: 1px solid var(--rule); background: var(--panel); color: var(--ink); cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, .2); }
 .app.mapfull, body.easy .app.mapfull { grid-template-columns: 1fr; }

@@ -85,7 +85,7 @@ export function createAssistant(ctx) {
     stopDeps = new Map();
     for (const t of ctx.B.trips) for (let k = 0; k < t[6].length; k += 2) stopDeps.set(t[6][k], (stopDeps.get(t[6][k]) || 0) + 1);
     for (const it of ctx.index) {
-      if (it.kind !== "stop") continue;
+      if (it.kind !== "stop" || it.area) continue;
       const label = it.label;
       const toks = words(label).filter((w) => !/^[a-z]{1,3}\d{1,2}[a-z]?$/.test(w));   // drop stand codes like ag6
       if (!toks.length) continue;
@@ -167,7 +167,7 @@ export function createAssistant(ctx) {
     let h, mi, ap;
     if (m) { h = +m[1]; mi = +m[2]; ap = m[3]; }
     else if ((m = t.match(/\b(\d{1,2})\s*(am|pm)\b/))) { h = +m[1]; mi = 0; ap = m[2]; }
-    else if ((m = t.match(/\b(?:at|around|by)\s+(\d{1,2})\b(?!\s*(?:min|mins|minutes|stops))/))) { h = +m[1]; mi = 0; }
+    else if ((m = t.match(/\b(?:at|around|by|after|before)\s+(\d{1,2})\b(?!\s*(?:min|mins|minutes|stops|bus|buses))/))) { h = +m[1]; mi = 0; }
     else return null;
     if (h > 24 || mi > 59) return null;
     if (ap === "pm" && h < 12) h += 12;
@@ -176,23 +176,88 @@ export function createAssistant(ctx) {
     return h * 3600 + mi * 60;
   }
 
-  function journeyParts(text) {
+  // "by 9am", "after 6", "least walking", "my usual bus is delayed": what the journey has to fit
+  const WHEN_RE = /\b(?:by|before|for|at|around|after|from|leaving|leave|arriving|arrive|arrival|depart\w*|be there by|get there by)\s+(?:about\s+|around\s+)?\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm|oclock)?\b|\b\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)\b|\b(?:tonight|this (?:morning|afternoon|evening)|right now|now|asap|today)\b/g;
+  const PREF_RE = /\b(?:with |by |using |on )?(?:the )?(?:fastest|quickest|shortest|most reliable|reliable|safest|least walking|less walking|minimal walking|no walking|without walking|fewest changes|least changes|fewer changes|no changes|without changing|directly|direct|cheapest)\b(?:\s+(?:way|route|journey|option|bus|trip))?/g;
+  const ALT_RE = /\b(?:an? )?(?:alternative|another way|other way|instead)\b|\b(?:because|as|since|cos|cause)\b.*$|\bmy (?:usual|normal|regular) bus\b.*$/g;
+  function tripOpts(raw) {
+    const t = norm(raw), o = {};
+    const tm = findTime(raw);
+    if (tm != null) {
+      if (/\b(by|before|be there|get there|arriv\w*|for)\s+(?:about\s+|around\s+)?\d/.test(t) || /\barrive\b/.test(t)) o.by = tm;
+      else o.after = tm;
+    }
+    if (/\b(least|less|minimal|no|without) walk/.test(t)) o.pref = "walk";
+    else if (/\b(fewest|least|fewer|no) changes?\b|\bwithout changing\b|\bdirect(ly)?\b/.test(t)) o.pref = "changes";
+    else if (/\b(most )?reliable\b|\bsafest\b|\bwont let me down\b/.test(t)) o.pref = "reliable";
+    else if (/\b(fastest|quickest|shortest)\b/.test(t)) o.pref = "fast";
+    if (/\b(alternative|another way|other way|instead|delayed|cancelled|late|not coming|didnt come)\b/.test(t)) { o.alt = true; o.pref = o.pref || "reliable"; }
+    return o;
+  }
+  const tripText = (raw) => norm(raw).replace(ALT_RE, " ").replace(WHEN_RE, " ").replace(PREF_RE, " ").replace(/\b(i need|i want|i have|i must|i would like|id like|need|want|please)\b/g, " ").replace(/\s+/g, " ").trim();
+  // places people name that aren't stop names: campuses, the city centre, and whole streets or districts
+  // ("Crookes" means any Crookes/… stop). An area is all its stops, so a plan can use any of them.
+  const LANDMARKS = [
+    [/^(the )?(university of sheffield|uni of sheffield|sheffield uni|sheffield university|tuos|firth court|the diamond|diamond|students union)$/, "University of Sheffield", /^Western Bank\/|^Glossop Road\/(Clarkson Street|Gell Street)$/],
+    [/^(the )?(sheffield hallam( uni| university)?|hallam( uni| university)?|shu|city campus|hallam city campus)$/, "Sheffield Hallam City Campus", /^Arundel Gate\/(AG\d+|Howard Street|Furnival Street|Charles Street)$|^Howard Street\//],
+    [/^(the )?(collegiate( campus| crescent)?|hallam collegiate)$/, "Collegiate Campus", /^Ecclesall Road\/Collegiate Crescent$/],
+    [/^(the )?(northern general( hospital)?|ngh)$/, "Northern General Hospital", /^Northern General Hospital\//],
+    [/^(sheffield )?(the )?(interchange|bus station)$/, "Sheffield Interchange", /^Sheffield Interchange\//],
+    [/^(sheffield )?(city centre|city center|town centre|town center|town|centre|center)$/, "Sheffield city centre", /^(Sheffield Interchange|Arundel Gate|Flat Street|Pond Street|Haymarket|Commercial Street|Snig Hill|Castle Street|Angel Street|Exchange Place|Paternoster Row|Rockingham Street|Waingate|Eyre Street|Moor Market|Charter Row|Furnival Gate)\/|\/(HS|CG|FS|SS|RS|AG)\d+[A-Z]?$|^Eyre Street\/Moor Market/],
+  ];
+  function areaItem(label, ids) {
+    const key = `area:${label}`;
+    let it = ctx.index.find((x) => x.key === key);
+    if (!it && ids.length) { it = { kind: "stop", key, label, sub: `${ids.length} stops`, stops: ids, area: true }; ctx.index.push(it); }
+    return it || null;
+  }
+  function stopsMatching(re) { const ids = []; ctx.B.stops.forEach(([n], i) => { if (re.test(n)) ids.push(i); }); return ids; }
+  function streetArea(text) {           // "crookes" -> every Crookes/… stop, if they're close together
     const t = norm(text);
+    if (!t || t.split(" ").length > 4) return null;
+    const ids = []; let label = null;
+    ctx.B.stops.forEach(([n], i) => { const pre = n.split("/")[0]; if (norm(pre) === t) { ids.push(i); label = pre; } });
+    if (ids.length < 2) return null;
+    let far = 0; for (const a of ids) for (const b of ids) far = Math.max(far, metres(a, b));
+    return far <= 900 ? areaItem(label, ids) : null;
+  }
+  function areaByKey(key) {
+    prepare();
+    const label = key.replace(/^area:/, "");
+    const lm = LANDMARKS.find((x) => x[1] === label);
+    return lm ? areaItem(lm[1], stopsMatching(lm[2])) : streetArea(label);
+  }
+  function resolvePlace(text) {
+    const t = norm(text).replace(/^(the|my) /, "").trim();
+    for (const [re, label, stopsRe] of LANDMARKS) if (re.test(t)) { const it = areaItem(label, stopsMatching(stopsRe)); if (it) return { it, cover: 1 }; }
+    const exact = ctx.index.find((x) => x.kind === "stop" && !x.area && norm(x.label) === t);
+    if (exact) return { it: exact, cover: 1 };
+    const st0 = streetArea(t);
+    if (st0) return { it: st0, cover: 1 };
+    return findStop(text, true);
+  }
+  const UNI_RE = /^(the )?(uni|university|college|campus)$/;
+
+  function journeyParts(text) {
+    const t = tripText(text);
     const back = t.match(/\bto\s+(.+?)\s+from\s+(.+)$/);
-    if (back) { const a = findStop(back[2], true), b = findStop(back[1], true); if (a && b && a.it.key !== b.it.key) return { from: a.it, to: b.it }; }
+    if (back) { const a = resolvePlace(back[2]), b = resolvePlace(back[1]); if (a && b && a.it.key !== b.it.key) return { from: a.it, to: b.it }; }
     const m = t.match(/\bfrom\s+(.+?)\s+to\s+(.+)$/) || t.match(/^(?:how (?:do|can|would) i (?:get|go)|get|go|getting|going|travel|route|bus|buses)\s+(?:from\s+)?(.+?)\s+to\s+(.+)$/)
       || t.match(/^(.+?)\s+to\s+(.+?)$/);
     if (!m) return null;
-    const a = findStop(m[1], true), b = findStop(m[2], true);
+    const a = resolvePlace(m[1]), b = resolvePlace(m[2]);
     return a && b && a.it.key !== b.it.key ? { from: a.it, to: b.it } : null;
   }
-  function destinationOnly(text) {      // "how do i get to crystal peaks", "bus to meadowhall"
-    const t = norm(text);
+  function destinationOnly(text) {      // "how do i get to crystal peaks", "bus to meadowhall", "get to the city centre by 9am"
+    const t = tripText(text);
     if (/\b(get|go|getting|going)\s+(back\s+)?home\b/.test(t)) return { home: "home" };
-    const m = t.match(/\b(?:get|go|getting|going|travel|take me|way)\s+(?:back\s+)?to\s+(.+)$/);
+    const m = t.match(/\b(?:get|go|getting|going|travel|take me|way|route|journey|bus|buses|be|reach)\s+(?:back\s+)?(?:to|at|in)\s+(.+)$/) || t.match(/^to\s+(.+)$/);
     if (!m) return null;
-    if (/^(home|my house|work|school|uni|university|college)\b/.test(m[1])) return { home: m[1].split(" ")[0] };
-    const b = findStop(m[1], true);
+    const place0 = m[1].replace(/^(the|my) /, "");
+    if (/^(home|my house|house)\b/.test(place0)) return { home: "home" };
+    if (/^(work|my work|the office|office|job)\b/.test(place0)) return { home: "work" };
+    if (UNI_RE.test(place0)) return { uni: true };
+    const b = resolvePlace(m[1]);
     return b ? { to: b.it } : null;
   }
 
@@ -215,7 +280,7 @@ export function createAssistant(ctx) {
     if (has(t, /\b(near|nearby|closest|nearest|around me|close to me|my location|where am i)\b/)) add("near", 3);
     if (has(t, /\b(today|network|overall|city|summary|status|how many|how are the buses|how is it going|stats|statistics)\b/)) add("today", 1.2);
     if (has(t, /\b(where does|where do|goes to|stops on|which stops|what stops|stops does|route of|path|stops)\b/)) add("info", 1.5);
-    if (has(t, /\b(get to|go to|get from|get home|go home|travel|journey|how do i get|how can i get|take me|from .+ to|way to)\b/)) add("plan", 2.2);
+    if (has(t, /\b(get to|go to|get from|get home|go home|travel|journey|how do i get|how can i get|take me|from .+ to|way to|route to|journey to|fastest|quickest|least walking|fewest changes|alternative)\b/)) add("plan", 2.2);
     if (has(t, /^(and )?(more|show me more|show more|after that|then|the one after|next one|later ones?|any more|others?)\b/) && t.split(" ").length <= 5) add("more", 3);
     if (has(t, /\b(tomorrow|sunday|monday|tuesday|wednesday|thursday|friday|saturday|weekend|sundays|saturdays|next week|christmas|bank holiday)\b/)) add("future", 1);
     if (has(t, /\b(what is|what are|what does|what do|explain|meaning|mean|why|how does|how do you|how is|who|is this|are you|is it|can i|can you|does it|do you|how accurate)\b/)) add("faq", 1);
@@ -499,83 +564,182 @@ export function createAssistant(ctx) {
     const [, la1, lo1] = ctx.B.stops[x], [, la2, lo2] = ctx.B.stops[y];
     return Math.hypot((lo1 - lo2) * 111320 * Math.cos((la1 * Math.PI) / 180), (la1 - la2) * 110540);
   }
-  // Journey planning: the earliest arrival, either direct or with one change. A change can be at the same
-  // stop or a short walk away (up to 300 m, at 1.2 m/s, plus a minute to find the stop).
-  function plan(from, to) {
-    const t0 = now(), A = new Set(from.stops), Bset = new Set(to.stops);
-    const direct = [], firstLeg = new Map(), cells = new Map();
+  // Journey planning. Every journey from A to B in the window, direct or with one change (at the same stop or
+  // a short walk away: up to 300 m at 1.2 m/s, plus a minute to find the stop). Then the best few, each for a
+  // different reason: fastest (or leave latest, for "arrive by"), most reliable, least walking, fewest changes.
+  // Nothing is made up: times come from the timetable and the buses' GPS. Delay estimates for buses that
+  // aren't tracked yet are labelled as estimates.
+  function legP(i) {                      // how likely this bus is to run: GPS-tracked, or its route's record
+    if (ctx.st(i) === "O") return 0.99;
+    const r = ctx.reliab(i); let p = r == null ? 0.95 : Math.max(0.5, r);
+    if (ctx.risk?.(i)?.level === "medium") p *= 0.85;
+    return p;
+  }
+  function estDelay(i) {
+    const L = ctx.live(i);
+    if (L) return { d: Math.max(0, L.delay), live: true };
+    const e = ctx.routeDelay?.(i);
+    return e && e.d >= 3 ? { d: e.d, live: false, n: e.n } : { d: 0, live: false };
+  }
+  function journeys(from, to, opt = {}) {
+    const tNow = now(), by = opt.by ?? null;
+    const t0 = opt.after != null ? Math.max(opt.after, tNow - 60) : by != null ? Math.max(tNow - 60, by - 3 * 3600) : tNow - 60;
+    const tMax = by != null ? by : t0 + 3 * 3600;
+    const A = new Set(from.stops), Bset = new Set(to.stops);
+    const out = [], firstLeg = new Map(), cells = new Map();
+    const usable = (i) => { const c = ctx.st(i); return c !== "G" && c !== "R" && ctx.risk?.(i)?.level !== "high"; };
+    const legOf = (i, ka, secsA, dep, kb, arr, dl) => ({ i, kA: ka, secsA, dep, kB: kb, arr, est: !dl.live && dl.d > 0, estN: dl.n || 0, estD: dl.d });
+    const mk = (legs, walk = 0, buffer = null) => {
+      let p = legs.reduce((a, l) => a * legP(l.i), 1);
+      if (legs.length > 1) p *= buffer < 120 ? 0.75 : buffer < 300 ? 0.9 : 1;
+      return { legs, dep: legs[0].dep, arr: legs.at(-1).arr, walk, changes: legs.length - 1, buffer, p, key: legs.map((l) => l.i).join("+") };
+    };
     ctx.B.trips.forEach((t, i) => {
-      const s = t[6]; let ka = -1, depA = 0;
-      if (ctx.st(i) === "G" || ctx.st(i) === "R" || ctx.risk?.(i)?.level === "high") return;
+      if (!usable(i)) return;
+      const s = t[6]; let ka = -1, depA = 0, secsA = 0, dl = null;
       for (let k = 0; k < s.length; k += 2) {
         const secs = t[2] + s[k + 1] * 60;
         if (ka < 0) {
           if (!A.has(s[k]) || k >= s.length - 2) continue;
           const ex = ctx.expected(i, k / 2, secs);
-          if (ex.passed || ex.secs < t0 - 60 || ex.secs > t0 + 3 * 3600) break;
-          ka = k; depA = ex.secs;
+          if (ex.passed || ex.secs < t0 || ex.secs > tMax) break;
+          ka = k; depA = ex.secs; secsA = secs; dl = estDelay(i);
           continue;
         }
-        const arr = secs + (ctx.live(i) ? Math.max(0, ctx.live(i).delay) * 60 : 0);
-        if (Bset.has(s[k])) { direct.push({ i, dep: depA, arr, kA: ka / 2, secsA: t[2] + s[ka + 1] * 60 }); break; }
-        if (depA <= t0 + 90 * 60) {
-          const prev = firstLeg.get(s[k]);
-          if (!prev || arr < prev.arr) {
-            const leg = { arr, i, dep: depA, kA: ka / 2, secsA: t[2] + s[ka + 1] * 60, stop: s[k] };
-            firstLeg.set(s[k], leg);
-            const c = cellOf(s[k]); if (!cells.has(c)) cells.set(c, new Set()); cells.get(c).add(s[k]);
-          }
-        }
+        const arr = secs + dl.d * 60;
+        if (Bset.has(s[k])) { if (by == null || arr <= by) out.push(mk([legOf(i, ka / 2, secsA, depA, k / 2, arr, dl)])); break; }
+        if (!firstLeg.has(s[k])) { firstLeg.set(s[k], []); const c = cellOf(s[k]); if (!cells.has(c)) cells.set(c, new Set()); cells.get(c).add(s[k]); }
+        firstLeg.get(s[k]).push({ ...legOf(i, ka / 2, secsA, depA, k / 2, arr, dl), stop: s[k] });
       }
     });
-    direct.sort((a, b) => a.arr - b.arr);
-    let change = null;
-    if (!direct.length || direct[0].arr - t0 > 40 * 60) {
-      const near = (x) => {
-        const [a, b] = cellOf(x).split(":").map(Number), out = [];
-        for (let da = -1; da <= 1; da++) for (let db = -1; db <= 1; db++) for (const y of cells.get(`${a + da}:${b + db}`) || []) out.push(y);
-        return out;
-      };
-      ctx.B.trips.forEach((t, i) => {
-        if (ctx.st(i) === "G" || ctx.st(i) === "R") return;
-        const s = t[6];
-        let bestHere = null;
-        for (let k = 0; k < s.length - 2; k += 2) {
-          if (Bset.has(s[k])) break;
-          const dep = t[2] + s[k + 1] * 60;
-          for (const y of near(s[k])) {
-            const leg = firstLeg.get(y); if (!leg || leg.i === i) continue;
-            const walk = y === s[k] ? 0 : metres(y, s[k]);
-            if (walk > 300) continue;
+    const near = (x) => {
+      const [a, b] = cellOf(x).split(":").map(Number), res = [];
+      for (let da = -1; da <= 1; da++) for (let db = -1; db <= 1; db++) for (const y of cells.get(`${a + da}:${b + db}`) || []) res.push(y);
+      return res;
+    };
+    ctx.B.trips.forEach((t, i) => {
+      if (!usable(i)) return;
+      const s = t[6]; let best = null;
+      for (let k = 0; k < s.length - 2; k += 2) {
+        if (Bset.has(s[k])) break;
+        const secs = t[2] + s[k + 1] * 60;
+        if (secs < t0 - 3600 || secs > tMax + 3600) continue;
+        const ex = ctx.expected(i, k / 2, secs);
+        if (ex.passed) continue;
+        for (const y of near(s[k])) {
+          const legs = firstLeg.get(y); if (!legs) continue;
+          const walk = y === s[k] ? 0 : metres(y, s[k]);
+          if (walk > 300) continue;
+          // of the first buses that make this connection, the one that lets you leave latest (least waiting)
+          for (const leg of legs) {
+            if (leg.i === i || ctx.B.trips[leg.i][0] === t[0]) continue;
             const ready = leg.arr + (walk ? walk / 1.2 + 60 : 60);
-            if (dep < ready || dep > leg.arr + 40 * 60) continue;
-            if (!bestHere || leg.arr < bestHere.leg.arr) bestHere = { leg, k, dep, walk };
+            if (ex.secs < ready || ex.secs > leg.arr + 40 * 60) continue;
+            if (!best || leg.dep > best.leg.dep || (leg.dep === best.leg.dep && walk < best.walk)) best = { leg, k, dep: ex.secs, secs, walk, buffer: ex.secs - ready };
           }
-          if (bestHere) break;
         }
-        if (!bestHere) return;
-        for (let j = bestHere.k + 2; j < s.length; j += 2) if (Bset.has(s[j])) {
-          const arr = t[2] + s[j + 1] * 60;
-          if (!change || arr < change.arr) change = { leg: bestHere.leg, i2: i, at: s[bestHere.k], dep2: bestHere.dep, k2: bestHere.k / 2, arr, walk: bestHere.walk };
-          break;
-        }
-      });
+        if (best) break;
+      }
+      if (!best) return;
+      const dl = estDelay(i);
+      for (let j = best.k + 2; j < s.length; j += 2) if (Bset.has(s[j])) {
+        const arr = t[2] + s[j + 1] * 60 + dl.d * 60;
+        if (by == null || arr <= by) out.push(mk([best.leg, { ...legOf(i, best.k / 2, best.secs, best.dep, j / 2, arr, dl), at: s[best.k] }], best.walk, best.buffer));
+        break;
+      }
+    });
+    return { list: out, by, t0 };
+  }
+
+  // the few journeys worth showing, each with the reason it's there
+  function pickOptions(list, by) {
+    if (!list.length) return [];
+    const picks = new Map();
+    const add = (j, tag, why) => { if (!j) return; const o = picks.get(j.key) || { j, tags: [], why: [] }; o.tags.push(tag); o.why.push(why); picks.set(j.key, o); };
+    const byArr = [...list].sort((a, b) => a.arr - b.arr || b.dep - a.dep);
+    const first = byArr[0];
+    let lead;
+    if (by != null) {
+      const safe = list.filter((j) => j.p >= 0.9 && by - j.arr >= 120);
+      lead = [...(safe.length ? safe : list)].sort((a, b) => b.dep - a.dep || a.arr - b.arr)[0];
+      add(lead, "Leave latest", `The latest you can leave and still get there by ${ctx.hhmm(by)} (about ${Math.round((by - lead.arr) / 60)} min to spare).`);
+    } else {
+      lead = first;
+      add(lead, "Fastest", `Gets you there first, at about ${ctx.hhmm(lead.arr)}.`);
     }
+    const cap = (m) => (by != null ? list : list.filter((j) => j.arr <= first.arr + m * 60));
+    const rel = [...cap(20)].sort((a, b) => b.p - a.p || a.arr - b.arr)[0];
+    if (rel && rel.p > lead.p + 0.03) add(rel, "Most reliable", `${pctOf(rel.p)} likely to work out, against ${pctOf(lead.p)} for the ${by != null ? "latest" : "fastest"} option.`);
+    else add(lead, "Most reliable", `Also the most reliable choice right now (${pctOf(lead.p)} likely to work out).`);
+    if (list.some((j) => j.walk > 0)) {
+      const w = [...cap(30)].sort((a, b) => a.walk - b.walk || a.arr - b.arr)[0];
+      add(w, "Least walking", w.walk ? `Only about ${roundM(w.walk)} m of walking.` : "No walking between stops.");
+    }
+    if (list.some((j) => j.changes > 0)) {
+      const c = [...cap(45)].sort((a, b) => a.changes - b.changes || a.arr - b.arr)[0];
+      add(c, "Fewest changes", c.changes ? "Only one change." : "A direct bus, no changes.");
+    }
+    return [...picks.values()];
+  }
+  const pctOf = (p) => `${Math.round(p * 100)}%`;
+  const roundM = (m) => Math.max(50, Math.round(m / 50) * 50);
+
+  function warnings(j, by) {
+    const w = [];
+    if (j.changes && j.buffer != null && j.buffer < 180) w.push(`Tight change: about ${Math.max(0, Math.round(j.buffer / 60))} min at ${place(j.legs[1].at)}. If the ${ctx.routeOf(j.legs[0].i)[0]} is late you could miss the ${ctx.routeOf(j.legs[1].i)[0]}.`);
+    for (const l of j.legs) if (l.est) w.push(`The ${ctx.routeOf(l.i)[0]} isn’t tracked yet. Arrival includes about ${l.estD} min, because the other ${ctx.routeOf(l.i)[0]}s on the road are running that late (estimate).`);
+    for (const l of j.legs) { const rk = ctx.risk?.(l.i); if (rk?.level === "medium") w.push(`The ${ctx.routeOf(l.i)[0]} has been unreliable: ${rk.why[0]}.`); }
+    if (by != null && by - j.arr < 180) w.push(`Only ${Math.max(0, Math.round((by - j.arr) / 60))} min to spare before ${ctx.hhmm(by)}.`);
+    return w;
+  }
+  function legState(l) {
+    const L = ctx.live(l.i);
+    if (L) return L.delay > 1 ? `GPS: ${L.delay} min late` : L.delay < -1 ? `GPS: ${-L.delay} min early` : "GPS: on time";
+    const r = ctx.reliab(l.i);
+    return `timetable${r != null ? `, runs ${Math.round(r * 100)}%` : ""}`;
+  }
+  const leaveText = (l) => (l.dep - now() >= 3600 ? `at ${ctx.hhmm(l.dep)} (${legState(l)})` : `${whenText(l.dep)} (${ctx.hhmm(l.dep)}, ${legState(l)})`);
+  const callStop = (l, k) => ctx.B.trips[l.i][6][k * 2];
+  function journeyText(j, fromN0, toN0, from, to) {
+    const a = j.legs[0], r1 = ctx.routeOf(a.i)[0];
+    const fromN = from?.area ? `${fromN0} (${ctx.B.stops[callStop(a, a.kA)][0]})` : fromN0;
+    const toN = to?.area ? `${toN0} (${ctx.B.stops[callStop(j.legs.at(-1), j.legs.at(-1).kB)][0]})` : toN0;
+    if (!j.changes) return `Take the **${r1}** to ${ctx.headsign(a.i)} from ${fromN} ${leaveText(a)}. It gets to ${toN} at about **${ctx.hhmm(j.arr)}**, ${Math.round((j.arr - a.dep) / 60)} min on the bus.`;
+    const b = j.legs[1], off = place(ctx.B.trips[a.i][6][a.kB * 2]), on = place(b.at);
+    const walkText = j.walk ? `, walk about ${roundM(j.walk)} m to ${ctx.B.stops[b.at][0]}` : "";
+    return `Take the **${r1}** from ${fromN} ${leaveText(a)} to **${off}** (about ${ctx.hhmm(a.arr)})${walkText}, then the **${ctx.routeOf(b.i)[0]}** from ${on} at ${ctx.hhmm(b.dep)}. You’d reach ${toN} at about **${ctx.hhmm(j.arr)}**, ${Math.round((j.arr - a.dep) / 60)} min in all.`;
+  }
+  function legRows(j, toN) {
+    return j.legs.map((l, n) => ({ i: l.i, secs: l.secsA, k: l.kA, extra: n === j.legs.length - 1 ? `arrives ${toN || place(callStop(l, l.kB))} ${ctx.hhmm(l.arr)}` : `get off at ${place(ctx.B.trips[l.i][6][l.kB * 2])} ${ctx.hhmm(l.arr)}` }));
+  }
+  const PREF_TAG = { fast: "Fastest", reliable: "Most reliable", walk: "Least walking", changes: "Fewest changes" };
+  function options(from, to, opt = {}) {
+    const { list, by } = journeys(from, to, opt);
     const fromN = stopName(from), toN = stopName(to);
-    if (!direct.length && !change) return { say: [`I can’t find a bus from **${fromN}** to **${toN}** in the next few hours, direct or with one change. Try a nearby stop, or open the stop to see where its buses go.`], actions: [stopAction(from)] };
-    const best = direct[0], say = [];
-    if (best && (!change || best.arr <= change.arr + 300)) {
-      say.push(`Take the **${ctx.routeOf(best.i)[0]}** to ${ctx.headsign(best.i)} from ${fromN} ${whenText(best.dep)} (${ctx.hhmm(best.dep)}). It gets to ${toN} at about **${ctx.hhmm(best.arr)}**, ${Math.round((best.arr - best.dep) / 60)} min on the bus.`);
-      const more = direct.slice(1, 3).filter((d) => d.i !== best.i);
-      if (more.length) say.push(`After that: ${more.map((d) => `the ${ctx.routeOf(d.i)[0]} at ${ctx.hhmm(d.dep)} (arrives ${ctx.hhmm(d.arr)})`).join(", ")}.`);
-      const rel = ctx.reliab(best.i); if (rel != null && rel < 0.9) say.push(`Note: the ${ctx.routeOf(best.i)[0]} only ran ${ctx.pct(rel, 0)} of the time recently.`);
-      return { say, rows: direct.slice(0, 3).map((d) => ({ i: d.i, secs: d.secsA, k: d.kA, extra: `arrives ${toN} ${ctx.hhmm(d.arr)}` })), actions: [stopAction(from), stopAction(to)] };
+    const opts = pickOptions(list, by).map((o) => ({ ...o, text: journeyText(o.j, fromN, toN, from, to), warn: warnings(o.j, by), rows: legRows(o.j, to.area ? null : toN) }));
+    return { opts, by, fromN, toN, from, to };
+  }
+
+  function plan(from, to, opt = {}) {
+    const r = options(from, to, opt), { opts, fromN, toN, by } = r;
+    if (!opts.length) {
+      if (by != null) {
+        const any = options(from, to, { after: opt.after });
+        const e = any.opts.find((o) => o.tags.includes("Fastest"));
+        if (e) return { say: [`You can’t get from **${fromN}** to **${toN}** by ${ctx.hhmm(by)} by bus now. The earliest you’d get there is about **${ctx.hhmm(e.j.arr)}**.`, e.text], rows: e.rows, options: any.opts, actions: [stopAction(from), stopAction(to)] };
+      }
+      return { say: [`I can’t find a bus from **${fromN}** to **${toN}** ${opt.after != null ? `after ${ctx.hhmm(opt.after)}` : "in the next few hours"}, direct or with one change. Try a nearby stop, or open the stop to see where its buses go.`], actions: [stopAction(from)] };
     }
-    const c = change, off = place(c.leg.stop), on = place(c.at);
-    const walkText = c.walk ? `, walk about ${Math.max(50, Math.round(c.walk / 50) * 50)} m to ${ctx.B.stops[c.at][0]}` : "";
-    say.push(`No direct bus, so change once: take the **${ctx.routeOf(c.leg.i)[0]}** from ${fromN} ${whenText(c.leg.dep)} (${ctx.hhmm(c.leg.dep)}) to **${off}** (about ${ctx.hhmm(c.leg.arr)})${walkText}, then the **${ctx.routeOf(c.i2)[0]}** at ${ctx.hhmm(c.dep2)}. You’d reach ${toN} at about **${ctx.hhmm(c.arr)}**, ${Math.round((c.arr - c.leg.dep) / 60)} min in all.`);
-    if (best) say.push(`Or wait for the direct **${ctx.routeOf(best.i)[0]}** at ${ctx.hhmm(best.dep)}, arriving ${ctx.hhmm(best.arr)}.`);
-    return { say, rows: [{ i: c.leg.i, secs: c.leg.secsA, k: c.leg.kA, extra: `get off at ${off}` }, { i: c.i2, secs: c.dep2, k: c.k2, extra: `from ${on}` }], actions: [stopAction(from), stopAction(to)] };
+    const want = PREF_TAG[opt.pref];
+    const main = (want && opts.find((o) => o.tags.includes(want))) || opts[0];
+    const say = [];
+    if (opt.alt) say.push("Here are your options, best first. Buses that look like they won’t come are already left out.");
+    if (opt.pref === "changes" && main.j.changes) say.push("There’s no direct bus in this window, so this one has a single change.");
+    say.push(`${main.tags.join(" · ")}: ${main.text}`);
+    if (main.why.length) say.push(main.why.join(" "));
+    for (const w of main.warn) say.push(`⚠ ${w}`);
+    for (const o of opts) if (o !== main) say.push(`${o.tags.join(" · ")}: the ${o.j.legs.map((l) => `**${ctx.routeOf(l.i)[0]}**`).join(" then ")} leaving ${ctx.hhmm(o.j.dep)}, arriving about ${ctx.hhmm(o.j.arr)}. ${o.why.join(" ")}`);
+    return { say, rows: main.rows, options: opts, main, actions: [stopAction(from), stopAction(to), { label: "Compare options", href: `#/plan/${encodeURIComponent(from.key)}/${encodeURIComponent(to.key)}${by != null ? `/by-${ctx.hhmm(by).replace(":", "")}` : opt.after != null ? `/at-${ctx.hhmm(opt.after).replace(":", "")}` : ""}` }] };
   }
 
   function answerToday() {
@@ -649,6 +813,7 @@ export function createAssistant(ctx) {
     if (!stopHit && page?.kind === "stop" && /\b(here|this stop|this station|my stop)\b/.test(t)) { const it = ctx.index.find((x) => x.kind === "stop" && x.key === page.key); if (it) stopHit = { it, cover: 1 }; }
     if (!ris && page?.kind === "route" && /\b(this route|this bus|this one)\b/.test(t)) { const it = ctx.index.find((x) => x.kind === "route" && x.key === page.key); if (it) ris = [it.ri]; }
     const time = findTime(raw);
+    const topt = tripOpts(raw);
     const n = t.split(" ").length;
     const vague = /\b(it|its|that|this|they|them|one|there|same)\b/.test(t) || n <= 3;   // a follow-up about what we just discussed
     // a vague question on a stop or route page is about that stop or route
@@ -667,22 +832,23 @@ export function createAssistant(ctx) {
     };
 
     if (sc.near) return done({ say: ["Finding the stops closest to you…"], geo: true }, "near");
-    if (memo.pendingTo && stop && !ris && !journey) return done(plan(stop, memo.pendingTo), "plan");
-    if (journey) return done(plan(journey.from, journey.to), "plan");
+    if (memo.pendingTo && stop && !ris && !journey) return done(plan(stop, memo.pendingTo, memo.pendingOpt || {}), "plan");
+    if (journey) return done(plan(journey.from, journey.to, topt), "plan");
+    if (dest?.uni) return done({ say: ["Which uni? University of Sheffield (Western Bank) or Sheffield Hallam (City Campus)?"], chips: ["Get to the University of Sheffield", "Get to Sheffield Hallam"] }, "clarify");
     if (dest?.home || /\b(take me|get me|go|going|get)\s+(back\s+)?(home|to work)\b/.test(t)) {
-      const which = /\bwork\b/.test(t) ? "work" : "home", saved = ctx.places?.()[which];
+      const which = dest?.home === "work" || /\bto work\b/.test(t) ? "work" : "home", saved = ctx.places?.()[which];
       const target = saved && ctx.index.find((x) => x.kind === "stop" && x.key === saved.key);
       if (!target) return done({ say: [`I don’t know where your ${which} is yet. Open your ${which} stop and choose “Set as ${which}”, or tell me the stop, for example “how do I get from Arundel Gate to Hillsborough”.`] }, "clarify");
       const from = stop || (page?.kind === "stop" ? ctx.index.find((x) => x.kind === "stop" && x.key === page.key) : memo.stop);
-      if (from && from.key !== target.key) return done(plan(from, target), "plan");
-      memo.pendingTo = target;
+      if (from && from.key !== target.key) return done(plan(from, target, topt), "plan");
+      memo.pendingTo = target; memo.pendingOpt = topt;
       return done({ say: [`Where are you now? Type your stop (or tap “Buses near me”) and I’ll plan the way to your ${which}, **${stopName(target)}**.`], chips: ["Buses near me"] }, "ask-from");
     }
     if (dest?.to && !ris && memo.route && memo.focus !== "stop" && /\b(it|its|they|that one|this one)\b/.test(t)) return done(answerWhere(memo.route, dest.to), "where");
     if (dest?.to) {
       const from = page?.kind === "stop" ? ctx.index.find((x) => x.kind === "stop" && x.key === page.key) : memo.stop;
-      if (from && from.key !== dest.to.key) return done(plan(from, dest.to), "plan");
-      memo.pendingTo = dest.to;
+      if (from && from.key !== dest.to.key) return done(plan(from, dest.to, topt), "plan");
+      memo.pendingTo = dest.to; memo.pendingOpt = topt;
       return done({ say: [`Where are you starting from? Type the stop name (or tap “Buses near me”) and I’ll plan the way to **${stopName(dest.to)}**.`], chips: ["Buses near me"] }, "ask-from");
     }
     if (sc.more && memo.list?.kind === "next") return done(answerNext(memo.list.stop, memo.list.ris, memo.offset + 5), "more");
@@ -734,8 +900,9 @@ export function createAssistant(ctx) {
     return done({ ...HELP, say: ["I didn’t catch that. " + HELP.say[0], ...HELP.say.slice(1)] }, "fallback");
   }
 
-  function planKeys(a, b) { prepare(); return plan(a, b); }
+  function planKeys(a, b, opt) { prepare(); return plan(a, b, opt || {}); }
+  function optionsFor(a, b, opt) { prepare(); return options(a, b, opt || {}); }
   function nextFor(key) { prepare(); const it = ctx.index.find((x) => x.kind === "stop" && x.key === key); return it ? answerNext(it) : null; }
 
-  return { ask, nextFor, plan: planKeys, _debug: { findStop: (s) => { prepare(); return findStop(s)?.it?.label; }, findRoutes: (s) => { prepare(); return findRoutes(s); }, findTime, intentOf: (s) => intentOf(words(s).join(" ")) } };
+  return { ask, nextFor, plan: planKeys, options: optionsFor, area: areaByKey, _debug: { findStop: (s) => { prepare(); return findStop(s)?.it?.label; }, findRoutes: (s) => { prepare(); return findRoutes(s); }, findTime, intentOf: (s) => intentOf(words(s).join(" ")) } };
 }

@@ -7,7 +7,7 @@
 //   summary.json, routes.json, routes/<id>.json, recent_ghosts.json, shapes.json, model.json, monitoring.json
 // The two live files come from the `live` branch (updated every ~2 minutes); the copies on the site
 // (updated every ~13 minutes) are the fallback.
-import { createAssistant } from "./assistant.js?v=11";
+import { createAssistant } from "./assistant.js?v=12";
 
 const qs = new URLSearchParams(location.search);
 const DATA = qs.get("data") || "data";
@@ -104,7 +104,7 @@ function buildIndex() {
   for (const [name, ids] of byStopName) index.push({ kind: "stop", key: name, label: name, sub: "Bus stop", stops: ids });
   B.routes.forEach(([route, op], ri) => index.push({ kind: "route", key: slug(`${route}-${op}`), label: `Route ${route}`, sub: op, ri, num: route.toLowerCase() }));
 }
-const findItem = (kind, key) => index.find((x) => x.kind === kind && x.key === key);
+const findItem = (kind, key) => index.find((x) => x.kind === kind && x.key === key) || (kind === "stop" && key.startsWith("area:") && bot ? bot.area(key) : undefined);
 function search(q) {
   q = q.trim().toLowerCase(); if (!q) return [];
   const words = q.split(/\s+/);
@@ -240,6 +240,21 @@ function backupFor(i, stopIdx, afterSecs) {
   });
   return same || other;
 }
+// For a bus that isn't tracked yet: how late are the other buses on the same route and direction right now?
+// Only for buses due in the next hour, and only when at least 2 others are tracked. Always shown as an estimate.
+let delayCache = { at: null };
+function routeDelay(i) {
+  const t = trip(i);
+  if (live(i) || t[2] > nowSecs() + 3600) return null;
+  if (delayCache.at !== S.at || delayCache.day !== B.day) {
+    const m = new Map();
+    for (const [j, d] of S.live || []) { const u = trip(j), k = `${u[0]}|${u[1]}`; if (!m.has(k)) m.set(k, []); m.get(k).push(d); }
+    const out = new Map();
+    for (const [k, ds] of m) if (ds.length >= 2) { ds.sort((a, b) => a - b); out.set(k, { d: ds[Math.floor(ds.length / 2)], n: ds.length }); }
+    delayCache = { at: S.at, day: B.day, out };
+  }
+  return delayCache.out.get(`${t[0]}|${t[1]}`) || null;
+}
 const ageText = (L) => { const m = Math.round(((L?.age || 0) + Math.max(0, (Date.now() - new Date(S.at).getTime()) / 1000)) / 60); return m <= 1 ? "just now" : `${m} min ago`; };
 
 // one departure row, used by stops, routes and lists
@@ -258,10 +273,12 @@ function depRow(i, secs, k, now, extra) {
   const risk = ex.passed ? null : riskOf(i);
   const note = risk ? (risk.level === "high" ? "⚠ may not come" : "⚠ unreliable lately")
     : c === "O" ? `GPS · seen ${ageText(L)}`
+    : (c === "S" || c === "P") && !ex.passed && routeDelay(i)?.d >= 3 ? `timetable · likely ~${routeDelay(i).d} min late`
     : c === "S" ? `timetable${reliab(i) != null ? ` · runs ${Math.round(reliab(i) * 100)}%` : ""}`
     : c === "P" ? "timetable · no bus seen yet" : c === "R" ? "a bus was seen" : c === "G" ? "no bus seen" : c === "N" ? "not reporting" : "";
+  const rdTitle = !risk && (c === "S" || c === "P") && routeDelay(i)?.d >= 3 ? `Estimate: the other ${routeDelay(i).n} route ${routeOf(i)[0]} buses going this way are a median ${routeDelay(i).d} min late right now.` : null;
   const label = `${routeOf(i)[0]} to ${headsign(i)}, ${big}${small ? ` (${small})` : ""}. ${STATUS[c][1]}. ${note}`;
-  return el("a", { class: `dep ${STATUS[c][0]}${ex.passed || (secs < now - 300 && c !== "O") ? " past" : ""}${risk ? ` risk-${risk.level}` : ""}`, href: `#/trip/${i}`, "aria-label": label, title: risk ? risk.why.join("; ") : null },
+  return el("a", { class: `dep ${STATUS[c][0]}${ex.passed || (secs < now - 300 && c !== "O") ? " past" : ""}${risk ? ` risk-${risk.level}` : ""}`, href: `#/trip/${i}`, "aria-label": label, title: risk ? risk.why.join("; ") : rdTitle },
     el("span", { class: "when" }, el("b", { class: c === "O" ? `live ${delayClass(L?.delay)}` : "" }, big), el("small", {}, small)),
     badge(i),
     el("span", { class: "dest" }, el("b", {}, headsign(i)), el("small", { title: sub }, sub)),
@@ -363,37 +380,181 @@ function spokenStop(it, up) {
 }
 
 // ---------------------------------------------------------------- journey planner
-VIEWS.plan = (fromKey, toKey) => {
+// when: "" (leave now), "at-0815" (leave at), "by-0900" (arrive by)
+function parseWhen(w) {
+  const m = /^(at|by)-(\d{2})(\d{2})$/.exec(w || "");
+  return m ? { mode: m[1], secs: +m[2] * 3600 + +m[3] * 60 } : { mode: "now", secs: null };
+}
+const whenSeg = (mode, secs) => (mode === "now" || secs == null ? "" : `${mode}-${hhmm(secs).replace(":", "")}`);
+const planHref = (a, b, w) => `#/plan/${encodeURIComponent(a || "")}/${encodeURIComponent(b || "")}${w ? `/${w}` : ""}`;
+
+VIEWS.plan = (fromKey, toKey, whenKey) => {
   const fromIt = fromKey ? findItem("stop", fromKey) : null, toIt = toKey ? findItem("stop", toKey) : null;
+  const when = parseWhen(whenKey);
   const field = (id, label, it, other, which) => {
     const input = el("input", { id, type: "search", autocomplete: "off", placeholder: label, value: it ? it.label : "", "aria-label": label });
     const list = el("ul", { class: "q-list", role: "listbox", hidden: true });
     input.addEventListener("input", () => {
       const hits = search(input.value).filter((x) => x.kind === "stop").slice(0, 7);
       list.replaceChildren(...hits.map((h) => { const li = el("li", { role: "option" }, el("span", { class: "tag" }, "Stop"), el("b", {}, h.label), el("small", {}, h.sub));
-        li.addEventListener("mousedown", (e) => { e.preventDefault(); location.hash = which === "from" ? `#/plan/${encodeURIComponent(h.key)}/${encodeURIComponent(other || "")}` : `#/plan/${encodeURIComponent(other || "")}/${encodeURIComponent(h.key)}`; });
+        li.addEventListener("mousedown", (e) => { e.preventDefault(); location.hash = which === "from" ? planHref(h.key, other, whenKey) : planHref(other, h.key, whenKey); });
         return li; }));
       list.hidden = !hits.length;
     });
     input.addEventListener("blur", () => setTimeout(() => (list.hidden = true), 150));
     return el("div", { class: "plan-field" }, el("label", { for: id }, which === "from" ? "From" : "To"), el("div", { class: "search-box" }, input, list));
   };
+  // leave now / leave at / arrive by
+  const modeSel = el("select", { id: "plan-mode", "aria-label": "When" },
+    el("option", { value: "now" }, "Leave now"), el("option", { value: "at" }, "Leave at"), el("option", { value: "by" }, "Arrive by"));
+  modeSel.value = when.mode;
+  const timeIn = el("input", { id: "plan-time", type: "time", "aria-label": "Time", value: when.secs != null ? hhmm(when.secs) : hhmm(nowSecs() + 30 * 60), hidden: when.mode === "now" });
+  const go = () => {
+    const [h, m] = (timeIn.value || "").split(":").map(Number);
+    const secs = Number.isFinite(h) ? h * 3600 + (m || 0) * 60 : null;
+    location.hash = planHref(fromKey, toKey, whenSeg(modeSel.value, secs));
+  };
+  modeSel.addEventListener("change", () => { timeIn.hidden = modeSel.value === "now"; go(); });
+  timeIn.addEventListener("change", go);
+  const whenRow = el("div", { class: "plan-when" }, modeSel, timeIn);
+
   const p = places();
   const quick = el("div", { class: "chips" },
     el("button", { type: "button", class: "chip quiet", onclick: () => locateFrom(toKey) }, "📍 From where I am"),
-    p.home ? el("a", { class: "chip quiet", href: `#/plan/${encodeURIComponent(fromKey || "")}/${encodeURIComponent(p.home.key)}` }, "To home") : null,
-    p.work ? el("a", { class: "chip quiet", href: `#/plan/${encodeURIComponent(fromKey || "")}/${encodeURIComponent(p.work.key)}` }, "To work") : null,
-    fromKey || toKey ? el("a", { class: "chip quiet", href: `#/plan/${encodeURIComponent(toKey || "")}/${encodeURIComponent(fromKey || "")}` }, "⇅ Swap") : null);
+    p.home ? el("a", { class: "chip quiet", href: planHref(fromKey, p.home.key, whenKey) }, "To home") : null,
+    p.work ? el("a", { class: "chip quiet", href: planHref(fromKey, p.work.key, whenKey) }, "To work") : null,
+    fromKey || toKey ? el("a", { class: "chip quiet", href: planHref(toKey, fromKey, whenKey) }, "⇅ Swap") : null);
   let result = null;
-  if (fromIt && toIt) {
-    if (fromIt.key === toIt.key) result = el("p", { class: "muted" }, "That’s the same stop.");
-    else { const a = bot.plan(fromIt, toIt); result = el("div", { class: "plan-result" }, answerNodes(a)); }
-  } else result = el("p", { class: "muted" }, "Pick where you’re starting and where you’re going. Plans use live bus positions, so late buses are taken into account, and skip any bus that looks like it won’t come. One change is allowed, including a short walk between nearby stops.");
-  if (map && fromIt && toIt) { ctxLayer.clearLayers(); for (const s0 of [...fromIt.stops, ...toIt.stops]) { const q = B.stops[s0]; L.circleMarker([q[1], q[2]], { radius: 8, color: ink(), weight: 3, fillColor: "#fff", fillOpacity: 1 }).bindTooltip(q[0]).addTo(ctxLayer); }
-    if (!current.fitted) { fit([...fromIt.stops, ...toIt.stops].map((s0) => [B.stops[s0][1], B.stops[s0][2]]), 14); current.fitted = true; } drawVehicles(new Set()); }
+  if (fromIt && toIt && fromIt.key === toIt.key) result = el("p", { class: "muted" }, "That’s the same stop.");
+  else if (fromIt && toIt) {
+    const opt = when.mode === "by" ? { by: when.secs } : when.mode === "at" ? { after: when.secs } : {};
+    const r = bot.options(fromIt, toIt, opt);
+    if (!r.opts.length) result = el("div", { class: "plan-result" }, answerNodes(bot.plan(fromIt, toIt, opt)));
+    else {
+      result = el("div", { class: "options" }, r.opts.map((o, n) => optionCard(o, n === 0)));
+      if (map) drawPlanMap(fromIt, toIt, r.opts[0]);
+    }
+  } else result = el("p", { class: "muted" }, "Pick where you’re starting and where you’re going. You’ll get the fastest, the most reliable, the least walking and the fewest changes, using live bus positions. Buses that look like they won’t come are left out, and one change is allowed, including a short walk between nearby stops.");
+  const saved = fromIt && toIt && fromIt.key !== toIt.key ? journeySaveButton(fromIt, toIt) : null;
+  const note = fromIt && toIt ? el("p", { class: "muted small" }, "How the “likely to work out” figure is made: a bus tracked by GPS counts as 99%, otherwise its route’s share of buses that ran over the days checked, lowered for recent trouble or a tight change. It’s an estimate, not a promise. Fares and step-free access aren’t shown because there’s no verified data for them yet.") : null;
   return [el("div", { class: "head" }, el("p", { class: "kicker" }, "Journey planner"), el("h2", {}, "Plan a bus journey")),
-    el("div", { class: "plan-form" }, field("plan-from", "Starting stop", fromIt, toKey, "from"), field("plan-to", "Destination stop", toIt, fromKey, "to")), quick, result];
+    el("div", { class: "plan-form" }, field("plan-from", "Starting stop", fromIt, toKey, "from"), field("plan-to", "Destination stop", toIt, fromKey, "to"), whenRow), quick, saved, result, note];
 };
+function optionCard(o, first) {
+  const j = o.j, now = nowSecs();
+  const leave = Math.round((j.dep - now) / 60);
+  return el("article", { class: `option${first ? " best" : ""}` },
+    el("div", { class: "opt-tags" }, o.tags.map((t) => el("span", { class: "opt-tag" }, t))),
+    el("div", { class: "opt-head" },
+      el("b", { class: "opt-times" }, `${hhmm(j.dep)} → ${hhmm(j.arr)}`),
+      el("span", {}, `${Math.round((j.arr - j.dep) / 60)} min · ${j.changes ? "1 change" : "direct"}${j.walk ? ` · ${Math.max(50, Math.round(j.walk / 50) * 50)} m walk` : ""}`),
+      el("span", { class: "opt-p", title: "Estimated chance the whole journey works as planned" }, `${Math.round(j.p * 100)}% likely`)),
+    el("p", { class: "opt-leave" }, leave <= 0 ? "Leave now" : leave < 60 ? `Be at the stop in ${leave} min` : `Be at the stop by ${hhmm(j.dep)}`),
+    el("div", { class: "list mini" }, o.rows.map((r) => depRow(r.i, r.secs, r.k, now, r.extra))),
+    el("ul", { class: "opt-why" }, o.why.map((w) => el("li", {}, w)), o.warn.map((w) => el("li", { class: "warn" }, `⚠ ${w}`))));
+}
+function drawPlanMap(fromIt, toIt, o) {
+  ctxLayer.clearLayers();
+  const pts = [];
+  for (const l of o.j.legs) {
+    const s = B.trips[l.i][6], line = [];
+    for (let k = l.kA * 2; k <= l.kB * 2; k += 2) { const q = B.stops[s[k]]; line.push([q[1], q[2]]); }
+    L.polyline(line, { color: ink(), weight: 5, opacity: 0.85 }).addTo(ctxLayer);
+    pts.push(...line);
+  }
+  for (const s0 of [...fromIt.stops, ...toIt.stops]) { const q = B.stops[s0]; L.circleMarker([q[1], q[2]], { radius: 7, color: ink(), weight: 3, fillColor: "#fff", fillOpacity: 1 }).bindTooltip(q[0]).addTo(ctxLayer); }
+  drawVehicles(new Set(o.j.legs.map((l) => l.i)));
+  if (!current.fitted && pts.length) { fit(pts, 15); current.fitted = true; }
+}
+
+// ---------------------------------------------------------------- saved journeys and commute alerts
+// Saved in this browser only. Alerts run while the page is open (a tab in the background is fine); alerts with
+// the page closed would need a push server, which this static site doesn't have.
+const journeysSaved = () => store.get("gb:journeys", []);
+const jKey = (a, b) => `${a}→${b}`;
+function journeySaveButton(fromIt, toIt) {
+  const has = journeysSaved().some((x) => x.from === fromIt.key && x.to === toIt.key);
+  return el("button", { type: "button", class: "chip quiet save-j", "aria-pressed": String(has), onclick: () => {
+    let js = journeysSaved();
+    if (has) js = js.filter((x) => !(x.from === fromIt.key && x.to === toIt.key));
+    else { js.unshift({ from: fromIt.key, to: toIt.key, alert: false, time: "", lead: 5 }); toast(`Saved. ${shortStop(fromIt.label)} → ${shortStop(toIt.label)} is now on your home screen.`); }
+    store.set("gb:journeys", js.slice(0, 6)); render();
+  } }, has ? "★ Saved journey" : "☆ Save this journey");
+}
+function updateJourney(j, patch) {
+  store.set("gb:journeys", journeysSaved().map((x) => (x.from === j.from && x.to === j.to ? { ...x, ...patch } : x)));
+}
+function bestNow(j) {
+  const a = findItem("stop", j.from), b = findItem("stop", j.to);
+  if (!a || !b || !bot) return null;
+  const r = bot.options(a, b, {});
+  return { a, b, o: r.opts[0] || null, all: r.opts };
+}
+function journeyCard(j) {
+  const x = bestNow(j);
+  if (!x) return null;
+  const now = nowSecs(), o = x.o;
+  let line, state = null;
+  if (!o) line = el("p", { class: "muted" }, "No buses in the next few hours.");
+  else {
+    const l0 = o.j.legs[0], L0 = live(l0.i), m = Math.round((o.j.dep - now) / 60);
+    line = el("p", { class: "jc-line" }, badge(l0.i), o.j.changes ? el("span", { class: "muted" }, " + ") : null, o.j.changes ? badge(o.j.legs[1].i) : null,
+      el("b", {}, m <= 0 ? " due now" : m < 60 ? ` in ${m} min` : ` at ${hhmm(o.j.dep)}`), el("span", {}, ` · arrive ${hhmm(o.j.arr)}`));
+    state = el("small", { class: `jc-state ${L0 ? delayClass(L0.delay) : ""}` }, L0 ? `GPS: ${delayText(L0.delay)}, seen ${ageText(L0)}` : `timetable${reliab(l0.i) != null ? ` · runs ${Math.round(reliab(l0.i) * 100)}%` : ""}`, o.warn.length ? ` · ⚠ ${o.warn.length} warning${o.warn.length > 1 ? "s" : ""}` : "");
+  }
+  const alertBtn = el("button", { type: "button", class: `chip ${j.alert ? "" : "quiet"}`, "aria-pressed": String(Boolean(j.alert)), onclick: () => {
+    const on = !j.alert; updateJourney(j, { alert: on });
+    if (on && "Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
+    toast(on ? "Alerts on. You’ll hear when to leave, if your bus is late or may not come, and if a change gets tight. Keep Ghost Bus open in a tab." : "Alerts off.");
+    render(); checkCommutes();
+  } }, j.alert ? "🔔 Alerts on" : "🔕 Alerts off");
+  const timeIn = el("input", { type: "time", value: j.time || "", "aria-label": "Usual departure time (alerts only around this time)", title: "Usual time: alerts only from an hour before to 30 min after. Leave empty for all day." });
+  timeIn.addEventListener("change", () => updateJourney(j, { time: timeIn.value }));
+  const lead = el("select", { "aria-label": "Minutes you need to reach the stop" }, [2, 5, 10, 15].map((n) => el("option", { value: n }, `${n} min to stop`)));
+  lead.value = String(j.lead || 5);
+  lead.addEventListener("change", () => updateJourney(j, { lead: +lead.value }));
+  const del = el("button", { type: "button", class: "icon-btn", "aria-label": "Remove this journey", onclick: () => { store.set("gb:journeys", journeysSaved().filter((y) => !(y.from === j.from && y.to === j.to))); render(); } }, "×");
+  return el("article", { class: "jcard" },
+    el("a", { class: "jc-title", href: planHref(j.from, j.to) }, `${shortStop(x.a.label)} → ${shortStop(x.b.label)}`),
+    line, state,
+    el("div", { class: "jc-controls" }, alertBtn, j.alert ? timeIn : null, j.alert ? lead : null, del));
+}
+
+const sentAlerts = new Set((() => { try { return JSON.parse(sessionStorage.getItem("gb:sent") || "[]"); } catch { return []; } })());
+const lastPick = new Map();
+function notify(id, title, body) {
+  if (sentAlerts.has(id)) return;
+  sentAlerts.add(id);
+  try { sessionStorage.setItem("gb:sent", JSON.stringify([...sentAlerts].slice(-200))); } catch { /* private mode */ }
+  toast(`${title}: ${body}`, true);
+  try { if ("Notification" in window && Notification.permission === "granted") new Notification(title, { body, tag: id }); } catch { /* not supported */ }
+}
+function inWindow(j, now) {
+  if (!j.time) return true;
+  const [h, m] = j.time.split(":").map(Number), t = h * 3600 + m * 60;
+  return now >= t - 3600 && now <= t + 1800;
+}
+function checkCommutes() {
+  if (!B || !S || !bot) return;
+  const now = nowSecs();
+  for (const j of journeysSaved()) {
+    if (!j.alert || !inWindow(j, now)) continue;
+    const x = bestNow(j); if (!x?.o) continue;
+    const o = x.o, l0 = o.j.legs[0], r0 = routeOf(l0.i)[0], stop0 = shortStop(B.stops[B.trips[l0.i][6][l0.kA * 2]][0]);
+    const name = `${shortStop(x.a.label)} → ${shortStop(x.b.label)}`, k = jKey(j.from, j.to);
+    // the bus we suggested last time has gone bad: say so, and give the new one
+    const prev = lastPick.get(k);
+    if (prev != null && prev !== l0.i && (st(prev) === "G" || riskOf(prev)?.level === "high")) {
+      const ex = B.trips[prev];
+      notify(`${k}|switch|${prev}`, name, `The ${routeOf(prev)[0]} at ${hhmm(ex[2])} may not come. Take the ${r0} from ${stop0} at ${hhmm(o.j.dep)} instead, arriving about ${hhmm(o.j.arr)}.`);
+    }
+    lastPick.set(k, l0.i);
+    const L0 = live(l0.i), mins = Math.round((o.j.dep - now) / 60);
+    if (L0 && L0.delay >= 5) notify(`${k}|late|${l0.i}|${Math.floor(L0.delay / 5)}`, name, `Your ${r0} is ${L0.delay} min late. It should leave ${stop0} about ${hhmm(o.j.dep)} and get you there about ${hhmm(o.j.arr)}.`);
+    if (mins >= 0 && mins <= (j.lead || 5)) notify(`${k}|leave|${l0.i}`, name, `Leave now: the ${r0} leaves ${stop0} ${mins <= 0 ? "now" : `in ${mins} min`}${L0 ? " (tracked by GPS)" : " (timetable)"}.`);
+    if (o.j.changes && o.j.buffer != null && o.j.buffer < 180 && mins <= 30) notify(`${k}|tight|${o.j.key}`, name, `Tight change at ${shortStop(B.stops[o.j.legs[1].at][0])}: about ${Math.max(0, Math.round(o.j.buffer / 60))} min. Open Ghost Bus for other options.`);
+  }
+}
 function locateFrom(toKey) {
   if (!navigator.geolocation) return toast("Your browser can’t share your location.");
   toast("Finding your nearest stop…");
@@ -444,13 +605,14 @@ VIEWS.home = () => {
     : el("p", { class: "muted" }, "No routes with problems right now."));
   const ask = el("button", { type: "button", class: "ask-card", onclick: () => openChat() },
     el("b", {}, "Not sure? Just ask."), el("span", {}, "“When’s the next 52 from Arundel Gate?” · “How do I get to Meadowhall?”"));
-  const pl = places();
+  const pl = places(), js = journeysSaved();
   const trips0 = el("div", { class: "chips" },
     el("a", { class: "chip", href: "#/plan" }, "Plan a journey"),
     pl.home ? el("a", { class: "chip quiet", href: `#/plan//${encodeURIComponent(pl.home.key)}` }, "🏠 Take me home") : null,
     pl.work ? el("a", { class: "chip quiet", href: `#/plan//${encodeURIComponent(pl.work.key)}` }, "💼 To work") : null,
-    pl.home ? null : el("span", { class: "muted small" }, "Open your stop and choose “Set as home” for one-tap journeys."));
-  return [header, ask, stats, section("Journeys", trips0), fav, recent, popular, alertSec, ghostSec, lateSec, legendNote()];
+    js.length ? null : el("span", { class: "muted small" }, "Plan a journey and tap “Save this journey” to see it here with live times and alerts."));
+  const mine = js.length ? section("Your journeys", el("div", { class: "jcards" }, js.map(journeyCard)), el("p", { class: "muted small" }, "Alerts work while Ghost Bus is open in a tab.")) : null;
+  return [header, mine, ask, stats, section("Journeys", trips0), fav, recent, popular, alertSec, ghostSec, lateSec, legendNote()];
 };
 
 function legendNote() {
@@ -806,17 +968,17 @@ function modelBlock(m, mon) {
 
 // ---------------------------------------------------------------- router
 function parseHash() {
-  const [, kind = "home", key = "", sub = ""] = (location.hash.replace(/^#\/?/, "#/").match(/^#\/([^/]*)\/?([^/]*)\/?([^/]*)/) || []);
-  return { kind: kind || "home", key: decodeURIComponent(key), sub: decodeURIComponent(sub) };
+  const [, kind = "home", key = "", sub = "", extra = ""] = (location.hash.replace(/^#\/?/, "#/").match(/^#\/([^/]*)\/?([^/]*)\/?([^/]*)\/?([^/]*)/) || []);
+  return { kind: kind || "home", key: decodeURIComponent(key), sub: decodeURIComponent(sub), extra: decodeURIComponent(extra) };
 }
 function render(reset) {
   if (!B || !S) return;
   const h = parseHash();
-  const same = h.kind === current.kind && h.key === current.key && h.sub === current.sub;
+  const same = h.kind === current.kind && h.key === current.key && h.sub === current.sub && h.extra === current.extra;
   if (!same) current = { ...h, fitted: false, filter: h.kind === current.kind && h.key === current.key ? current.filter : null };
   const fn = VIEWS[h.kind] || VIEWS.home;
   const panel = $("#view"), top = panel.scrollTop;
-  panel.replaceChildren(...fn(h.key, h.sub).filter(Boolean));
+  panel.replaceChildren(...fn(h.key, h.sub, h.extra).filter(Boolean));
   if (same && !reset) panel.scrollTop = top; else panel.scrollTop = 0;
   for (const a of document.querySelectorAll(".nav a")) a.setAttribute("aria-current", a.dataset.v === (["stop", "route", "trip"].includes(h.kind) ? "home" : h.kind) ? "page" : "false");
   document.title = `${h.kind === "home" ? "" : `${$("#view h2")?.textContent || ""} · `}Ghost Bus Detector – Sheffield`;
@@ -888,6 +1050,7 @@ const ctx = {
   current: () => current,
   places: () => places(),
   risk: (i) => riskOf(i),
+  routeDelay: (i) => routeDelay(i),
 };
 function md(text) {        // **bold** only
   const out = []; text.split(/(\*\*[^*]+\*\*)/).forEach((p) => out.push(p.startsWith("**") ? el("b", {}, p.slice(2, -2)) : p));
@@ -1025,7 +1188,7 @@ async function refresh() {
   const [s, v] = got;
   if (S && s.at === S.at) return;
   if (!B || s.day !== B.day || s.version !== B.version) { const b = await get(`board/${s.day}.json`); if (!b) return; B = b; buildIndex(); }
-  setLive(s, v); freshness(); render(); checkReminders();
+  setLive(s, v); freshness(); render(); checkReminders(); checkCommutes();
 }
 
 async function main() {
@@ -1042,12 +1205,12 @@ async function main() {
   const b = await get(`board/${got[0].day}.json`);
   if (!b) { $("#view").replaceChildren(el("p", {}, "Today’s timetable is still loading. Try again in a few minutes.")); return; }
   B = b; buildIndex(); setLive(...got);
-  setupSearch(); setupChat(); setupTheme(); setupViewModes(); setupOffline(); freshness(); render(true);
+  setupSearch(); setupChat(); setupTheme(); setupViewModes(); setupOffline(); freshness(); render(true); checkCommutes();
   if (qs.get("ask")) { openChat(); askBot(qs.get("ask")); }
   addEventListener("hashchange", () => render(true));
   setInterval(refresh, 75000);   // the live branch updates every ~2 minutes
   setInterval(freshness, 15000);
-  setInterval(() => { render(); checkReminders(); }, 60000);   // countdowns move on even between data updates
+  setInterval(() => { render(); checkReminders(); checkCommutes(); }, 60000);   // countdowns move on even between data updates
 }
 
 main();
