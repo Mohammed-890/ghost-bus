@@ -7,6 +7,8 @@
 //   summary.json, routes.json, routes/<id>.json, recent_ghosts.json, shapes.json, model.json, monitoring.json
 // The two live files come from the `live` branch (updated every ~2 minutes); the copies on the site
 // (updated every ~13 minutes) are the fallback.
+import { createAssistant } from "./assistant.js?v=10";
+
 const qs = new URLSearchParams(location.search);
 const DATA = qs.get("data") || "data";
 const LIVE = qs.get("live") ?? "https://raw.githubusercontent.com/Mohammed-890/ghost-bus/live/";
@@ -140,7 +142,7 @@ function initMap() {
   if (!window.L) { $("#map").replaceChildren(el("p", { class: "map-off" }, "The map couldn’t load. Everything else still works.")); return; }
   darkMap = matchMedia("(prefers-color-scheme: dark)").matches;
   map = L.map("map", { zoomControl: false, zoomSnap: 0.25, preferCanvas: false }).setView([53.381, -1.47], 12);
-  L.control.zoom({ position: "bottomright" }).addTo(map);
+  L.control.zoom({ position: "topright" }).addTo(map);
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors', maxZoom: 19, className: darkMap ? "tiles-dark" : "" }).addTo(map);
   ctxLayer = L.layerGroup().addTo(map);
@@ -216,6 +218,70 @@ function depRow(i, secs, k, now, extra) {
     el("span", { class: "state" }, pill(c), el("small", {}, note)));
 }
 
+// ---------------------------------------------------------------- problems right now
+// A route has a problem if buses have recently not turned up, or the buses on it are badly late.
+function routeAlerts() {
+  const now = nowSecs(), out = new Map();
+  B.trips.forEach((t, i) => {
+    const c = st(i), ri = t[0];
+    if (!out.has(ri)) out.set(ri, { ri, ghosts2h: 0, ghostsToday: 0, judged: 0, late: 0, live: 0, maxLate: 0 });
+    const a = out.get(ri);
+    if (c === "G") { a.ghostsToday++; a.judged++; if (t[3] >= now - 7200) a.ghosts2h++; }
+    else if (c === "R") a.judged++;
+    const L0 = live(i);
+    if (L0) { a.live++; if (L0.delay >= 10) a.late++; a.maxLate = Math.max(a.maxLate, L0.delay); }
+  });
+  return [...out.values()].map((a) => {
+    const why = [];
+    if (a.ghosts2h >= 2) why.push(`${a.ghosts2h} buses didn’t turn up in the last 2 hours`);
+    else if (a.ghostsToday >= 3 && a.ghostsToday / Math.max(1, a.judged) >= 0.15) why.push(`${a.ghostsToday} of ${a.judged} buses today never came`);
+    if (a.late >= 2 || (a.live && a.late === a.live && a.maxLate >= 15)) why.push(`${a.late} bus${a.late === 1 ? "" : "es"} running 10+ min late`);
+    return { ...a, why };
+  }).filter((a) => a.why.length).sort((x, y) => y.ghosts2h - x.ghosts2h || y.late - x.late || y.ghostsToday - x.ghostsToday);
+}
+// Buses on the same route and direction that have caught each other up: the gap behind them will be long.
+function bunching(mine) {
+  const on = mine.filter(([, i]) => live(i)).map(([t, i]) => ({ i, t, L: live(i) })), pairs = [];
+  for (let a = 0; a < on.length; a++) for (let b = a + 1; b < on.length; b++) {
+    const x = on[a], y = on[b];
+    const kx = 111320 * Math.cos((x.L.lat * Math.PI) / 180);
+    const d = Math.hypot((x.L.lon - y.L.lon) * kx, (x.L.lat - y.L.lat) * 110540);
+    if (d < 450 && Math.abs(x.t[2] - y.t[2]) >= 8 * 60) pairs.push({ a: x, b: y, d });
+  }
+  return pairs;
+}
+function alertBox(a) {
+  return el("div", { class: "alert", role: "status" }, el("b", {}, `Route ${B.routes[a.ri][0]}: problems right now`), el("span", {}, `${a.why.join(" and ")}.`));
+}
+
+// ---------------------------------------------------------------- reminders: tell me before my bus gets here
+const reminders = [];
+function addReminder(i, k, secs, stopName) {
+  reminders.push({ i, k, secs, stopName, done: false });
+  if ("Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
+  toast(`I’ll tell you when the ${routeOf(i)[0]} is 5 minutes from ${shortStop(stopName)}. Keep this page open.`);
+  checkReminders();
+}
+function checkReminders() {
+  if (!B) return;
+  const now = nowSecs();
+  for (const r of reminders) {
+    if (r.done) continue;
+    const ex = expected(r.i, r.k, r.secs), mins = Math.round((ex.secs - now) / 60);
+    if (ex.passed || mins <= 5) {
+      r.done = true;
+      const msg = ex.passed ? `The ${routeOf(r.i)[0]} has already passed ${shortStop(r.stopName)}.` : `The ${routeOf(r.i)[0]} to ${headsign(r.i)} is ${mins <= 0 ? "due now" : `${mins} min away`} at ${shortStop(r.stopName)}.`;
+      toast(msg, true);
+      try { if ("Notification" in window && Notification.permission === "granted") new Notification("Your bus", { body: msg }); } catch { /* not supported */ }
+    }
+  }
+}
+function toast(msg, loud) {
+  const t = el("div", { class: `toast${loud ? " loud" : ""}`, role: loud ? "alert" : "status" }, msg, el("button", { type: "button", "aria-label": "Dismiss", onclick: () => t.remove() }, "×"));
+  $("#toasts").append(t);
+  setTimeout(() => t.remove(), loud ? 30000 : 6000);
+}
+
 // ---------------------------------------------------------------- views
 const VIEWS = {};
 let current = { kind: "home" };
@@ -251,7 +317,14 @@ VIEWS.home = () => {
     : el("p", { class: "muted" }, "Nothing is running late right now."));
   ctxLayer?.clearLayers(); drawVehicles(null);
   if (map && !current.fitted) { fit(V.v.map((v) => [v[0], v[1]]), 12.5); current.fitted = true; }
-  return [header, stats, fav, recent, popular, ghostSec, lateSec, legendNote()];
+  const alerts = routeAlerts().slice(0, 6);
+  const alertSec = section("Problems right now", alerts.length
+    ? el("div", { class: "alerts" }, alerts.map((a) => el("a", { class: "alert-row", href: href("route", slug(`${B.routes[a.ri][0]}-${B.routes[a.ri][1]}`)) },
+        el("span", { class: "rt" }, B.routes[a.ri][0]), el("span", {}, el("b", {}, B.routes[a.ri][1]), el("small", {}, `${a.why.join(" · ")}`)))))
+    : el("p", { class: "muted" }, "No routes with problems right now."));
+  const ask = el("button", { type: "button", class: "ask-card", onclick: () => openChat() },
+    el("b", {}, "Not sure? Just ask."), el("span", {}, "“When’s the next 52 from Arundel Gate?” · “How do I get to Meadowhall?”"));
+  return [header, ask, stats, fav, recent, popular, alertSec, ghostSec, lateSec, legendNote()];
 };
 
 function legendNote() {
@@ -353,10 +426,16 @@ VIEWS.route = (key, sub) => {
     : el("p", { class: "muted" }, "No bus is running this direction right now."));
   const nextIdx = mine.findIndex(([t]) => t[2] >= now - 300);
   const list = el("div", { class: "list" }, mine.map(([t, i]) => depRow(i, t[2], 0, now, `from ${shortStop(t[4])}`)));
-  if (nextIdx > 0) setTimeout(() => list.children[Math.max(0, nextIdx - 1)]?.scrollIntoView({ block: "start" }), 60);
+  // start the timetable at the next departure, scrolling only inside its own box
+  if (nextIdx > 0) setTimeout(() => { const box = list.parentElement, row = list.children[Math.max(0, nextIdx - 1)]; if (box && row) box.scrollTop = row.offsetTop - list.offsetTop; }, 60);
   drawRouteMap(mine, new Set(onRoad.map(([, i]) => i)), current.key !== key || current.sub !== sub || !current.fitted);
   current.fitted = true;
-  return [head, seg, liveSec, section("Today’s timetable from the first stop", el("div", { class: "scroll" }, list))];
+  const al = routeAlerts().find((a) => a.ri === it.ri);
+  const bun = bunching(mine);
+  const bunSec = bun.length ? el("p", { class: "note" }, el("b", {}, "Buses bunched: "),
+    bun.slice(0, 2).map((p) => `the ${hhmm(p.a.t[2])} and ${hhmm(p.b.t[2])} departures are only ${Math.round(p.d / 10) * 10} m apart ${whereIs(p.a.i)}`).join("; "),
+    ". Expect a longer wait after them.") : null;
+  return [head, al ? alertBox(al) : null, seg, liveSec, bunSec, section("Today’s timetable from the first stop", el("div", { class: "scroll" }, list))];
 };
 
 function drawRouteMap(mine, focus, refit) {
@@ -436,7 +515,15 @@ VIEWS.trip = (key) => {
     drawVehicles(new Set([i]));
     if (current.key !== key || !current.fitted) { fit(L0 ? [...pts, [L0.lat, L0.lon]] : pts, 15); current.fitted = true; }
   }
-  return [head, section("Stops and times", tl), section("This departure on other days", histBox)];
+  let remind = null;
+  const ahead = cs.map((x, k) => ({ ...x, k })).filter((x) => { const ex = expected(i, x.k, x.secs); return !ex.passed && ex.secs > now + 300 && c !== "G" && c !== "R"; });
+  if (ahead.length) {
+    const sel = el("select", { "aria-label": "Your stop" }, ahead.map((x) => el("option", { value: x.k }, `${hhmm(x.secs)} ${B.stops[x.stop][0]}`)));
+    remind = section("Remind me", el("div", { class: "remind" }, sel, el("button", { type: "button", class: "icon-btn", onclick: () => {
+      const x = ahead.find((y) => String(y.k) === sel.value); if (x) addReminder(i, x.k, x.secs, B.stops[x.stop][0]); } }, "Tell me 5 min before")),
+      el("p", { class: "muted small" }, "Uses the live position of the bus, so it adjusts if the bus is running late."));
+  }
+  return [head, remind, section("Stops and times", tl), section("This departure on other days", histBox)];
 };
 
 VIEWS.network = () => {
@@ -485,9 +572,21 @@ VIEWS.network = () => {
     section("How late are the buses on the road?", hist),
     section("By hour: ran and never came", hours, el("div", { class: "hours-axis" }, ["00", "06", "12", "18", "23"].map((h) => el("span", {}, `${h}:00`)))),
     section("Most ghost buses today", worstRows.length ? el("div", { class: "chips" }, worstRows.map(([ri, n]) => el("a", { class: "chip quiet", href: href("route", slug(`${B.routes[ri][0]}-${B.routes[ri][1]}`)) }, `${B.routes[ri][0]} · ${n}`))) : el("p", { class: "muted" }, "None yet today.")),
+    section("Average delay by route right now", delayByRoute()),
     section("By operator", el("div", { class: "scroll-x" }, opTable)),
   ];
 };
+
+function delayByRoute() {
+  const by = new Map();
+  for (const [i, d] of S.live.map((x) => [x[0], x[1]])) { const ri = trip(i)[0]; if (!by.has(ri)) by.set(ri, []); by.get(ri).push(d); }
+  const rows = [...by].filter(([, ds]) => ds.length >= 2).map(([ri, ds]) => [ri, ds.reduce((a, b) => a + b, 0) / ds.length, ds.length]).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  if (!rows.length) return el("p", { class: "muted" }, "Not enough buses on the road to compare routes.");
+  const mx = Math.max(1, ...rows.map((r) => Math.abs(r[1])));
+  return el("div", { class: "bars" }, rows.map(([ri, avg, n]) => el("a", { class: "barrow link", href: href("route", slug(`${B.routes[ri][0]}-${B.routes[ri][1]}`)) },
+    el("span", {}, el("b", {}, B.routes[ri][0]), el("small", {}, ` ${n} buses`)), el("i", { class: delayClass(Math.round(avg)), style: `width:${(Math.abs(avg) / mx) * 100}%` }),
+    el("b", {}, `${avg >= 0 ? "+" : "−"}${Math.abs(avg).toFixed(1)}`))));
+}
 
 VIEWS.reliability = () => {
   const box = el("div", {}, el("p", { class: "muted" }, "Loading…"));
@@ -539,6 +638,8 @@ VIEWS.about = () => {
       el("p", { class: "muted" }, chk.n ? `Self-check right now: hiding the trip of the ${chk.n} buses that report one, the matching finds ${pct(chk.right / chk.n, 0)} of them again and names the wrong trip for ${pct(chk.wrong / chk.n, 0)}.` : "")),
     section("3. Judge every departure", el("p", {}, "Once a departure’s time is over, it’s checked: a bus reported that exact trip, or a bus passed its stops in order and on time. One bus can’t run two trips at once. A departure only counts as a ghost bus if the feed was answering for its whole run and the operator was visibly reporting its other buses. Otherwise it’s “no live data”, never counted against anyone.")),
     section("4. Learn and predict", el("p", {}, "Each morning the full day is judged again, and a model learns which departures tend not to run, by route, time and recent history. A new model only replaces the live one if it does better on days it has never seen. The data is checked every day for drift."), box),
+    section("5. Ask Ghost Bus", el("p", {}, "The assistant (bottom right) understands questions in plain English, typos included: when your bus is coming, where it is, whether it’s late, whether a bus turned up, how reliable a route is, and how to get from one stop to another, direct or with one change and a short walk. It runs entirely in your browser on the same live data as the map, so its answers are as fresh as the map and nothing you type leaves your device."),
+      el("button", { type: "button", class: "icon-btn", onclick: () => openChat() }, "Ask a question")),
     section("Open data", el("p", {}, "Everything this page shows is plain JSON you can use:"), el("ul", { class: "files" }, files.map((x) => el("li", {}, el("a", { href: `${x.startsWith("status") || x.startsWith("vehicles") ? LIVE || `${DATA}/` : `${DATA}/`}${x}` }, x))))),
     el("p", { class: "muted small" }, "“Never came” means no bus was seen. Causes include cancellations, driver shortages and trackers that were switched off. Not affiliated with any bus operator or the Department for Transport. Contains public sector information licensed under the Open Government Licence v3.0. ",
       el("a", { href: "https://github.com/Mohammed-890/ghost-bus" }, "Code and method on GitHub"), "."),
@@ -603,17 +704,19 @@ function setupSearch() {
   $("#near").addEventListener("click", nearMe);
 }
 
+function nearestStops(la, lo, n = 8) {
+  const kx = 111320 * Math.cos((la * Math.PI) / 180);
+  return [...byStopName].map(([name, ids]) => ({ name, d: Math.min(...ids.map((s) => Math.hypot((B.stops[s][2] - lo) * kx, (B.stops[s][1] - la) * 110540))) }))
+    .sort((a, b) => a.d - b.d).slice(0, n);
+}
 function nearMe() {
   const btn = $("#near");
   if (!navigator.geolocation) { btn.textContent = "Location not available"; return; }
   btn.textContent = "Finding you…";
   navigator.geolocation.getCurrentPosition((p) => {
     btn.textContent = "Near me";
-    const { latitude: la, longitude: lo } = p.coords, kx = 111320 * Math.cos((la * Math.PI) / 180);
-    const near = [...byStopName].map(([name, ids]) => {
-      const d = Math.min(...ids.map((s) => Math.hypot((B.stops[s][2] - lo) * kx, (B.stops[s][1] - la) * 110540)));
-      return { name, d };
-    }).sort((a, b) => a.d - b.d).slice(0, 8);
+    const { latitude: la, longitude: lo } = p.coords;
+    const near = nearestStops(la, lo);
     const now = nowSecs();
     $("#view").replaceChildren(el("div", { class: "head" }, el("p", { class: "kicker" }, "Near you"), el("h2", {}, "Closest stops")),
       near[0].d > 20000 ? el("p", { class: "muted" }, "You’re a long way from Sheffield, so these are the nearest stops in the city anyway.") : null,
@@ -628,6 +731,98 @@ function nearMe() {
     if (map) { ctxLayer.clearLayers(); L.circleMarker([la, lo], { radius: 8, color: "#fff", weight: 3, fillColor: "#2563EB", fillOpacity: 1 }).bindTooltip("You").addTo(ctxLayer); fit([[la, lo], ...near.slice(0, 4).map((x) => { const s = byStopName.get(x.name)[0]; return [B.stops[s][1], B.stops[s][2]]; })], 16); }
     current = { kind: "near" };
   }, () => { btn.textContent = "Location blocked"; setTimeout(() => (btn.textContent = "Near me"), 3000); }, { enableHighAccuracy: true, timeout: 10000 });
+}
+
+// ---------------------------------------------------------------- the assistant
+let bot = null;
+const ctx = {
+  get B() { return B; }, get S() { return S; }, get R() { return R; }, get RI() { return RI; }, get SUM() { return SUM; }, get index() { return index; },
+  now: nowSecs, calls, live, expected, st, headsign, routeOf, reliab, whereIs, delayText, hhmm, shortStop, slug, pct, num, href, search,
+  current: () => current,
+};
+function md(text) {        // **bold** only
+  const out = []; text.split(/(\*\*[^*]+\*\*)/).forEach((p) => out.push(p.startsWith("**") ? el("b", {}, p.slice(2, -2)) : p));
+  return out;
+}
+function say(who, ...kids) {
+  const m = el("div", { class: `msg ${who}` }, ...kids);
+  $("#chat-log").append(m);
+  m.scrollIntoView({ block: "end", behavior: reduced ? "auto" : "smooth" });
+  return m;
+}
+function botAnswer(a) {
+  const now = nowSecs();
+  const parts = (a.say || []).map((p) => el("p", {}, md(p)));
+  if (a.rows?.length) parts.push(el("div", { class: "list mini" }, a.rows.map((r) => { const row = depRow(r.i, r.secs, r.k, now, r.extra); row.addEventListener("click", maybeCloseChat); return row; })));
+  if (a.actions?.length) parts.push(el("div", { class: "chat-actions" }, a.actions.map((x) => el("a", { class: "chip quiet", href: x.href, onclick: maybeCloseChat }, x.label))));
+  say("bot", ...parts);
+  chips(a.chips || []);
+}
+function chips(list) {
+  $("#chat-chips").replaceChildren(...list.map((c) => el("button", { type: "button", class: "chip quiet", onclick: () => askBot(c) }, c)));
+}
+function maybeCloseChat() { if (innerWidth < 900) closeChat(); }
+function askBot(text) {
+  if (!B || !S) return;
+  text = String(text).trim(); if (!text) return;
+  say("you", el("p", {}, text));
+  const typing = say("bot typing", el("i"), el("i"), el("i"));
+  setTimeout(() => {
+    typing.remove();
+    let a;
+    try { a = bot.ask(text); } catch (e) { console.error(e); a = { say: ["Sorry, something went wrong working that out. Try asking another way?"] }; }
+    if (a.geo) {
+      botAnswer(a);
+      if (!navigator.geolocation) return botAnswer({ say: ["Your browser can’t share your location. Tell me the name of your stop instead."] });
+      navigator.geolocation.getCurrentPosition((p) => {
+        const near = nearestStops(p.coords.latitude, p.coords.longitude, 3);
+        const first = bot.nextFor(near[0].name);
+        botAnswer({ say: [`Closest stops: ${near.map((x) => `**${x.name}** (${x.d < 1000 ? `${Math.round(x.d / 10) * 10} m` : `${(x.d / 1000).toFixed(1)} km`})`).join(", ")}.`, ...(near[0].d > 20000 ? ["You look a long way from Sheffield, so these are just the nearest stops in the city."] : []), ...(first?.say || [])],
+          rows: first?.rows, actions: near.map((x) => ({ label: x.name, href: href("stop", x.name) })) });
+      }, () => botAnswer({ say: ["I couldn’t get your location. Tell me the name of your stop instead, for example “next bus from Arundel Gate”."] }), { timeout: 10000 });
+      return;
+    }
+    botAnswer(a);
+  }, reduced ? 0 : 220);
+}
+function openChat() {
+  const box = $("#chat");
+  box.hidden = false; document.body.classList.add("chatting");
+  $("#chat-open").setAttribute("aria-expanded", "true");
+  if (!$("#chat-log").children.length) {
+    const page = current.kind === "stop" ? findItem("stop", current.key) : current.kind === "route" ? findItem("route", current.key) : null;
+    botAnswer({ say: ["Hi! I can tell you when your bus is coming, where it is, if it’s late, whether a bus turned up, and how to get somewhere. I use the same live data as the map."],
+      chips: page?.kind === "stop" ? ["When’s the next bus here?", "How reliable is this stop?", "Buses near me"]
+        : page?.kind === "route" ? [`Where is the ${B.routes[page.ri][0]} now?`, `Is the ${B.routes[page.ri][0]} reliable?`, `Last ${B.routes[page.ri][0]} tonight`]
+        : ["Buses near me", "Where is the 52 right now?", "How do I get from Meadowhall to Crystal Peaks?", "What’s a ghost bus?", "How are the buses today?"] });
+  }
+  setTimeout(() => $("#chat-q").focus(), 50);
+}
+function closeChat() {
+  $("#chat").hidden = true; document.body.classList.remove("chatting");
+  $("#chat-open").setAttribute("aria-expanded", "false"); $("#chat-open").focus({ preventScroll: true });
+}
+function setupChat() {
+  bot = createAssistant(ctx);
+  window.__ghostBusAssistant = bot;           // handy for testing from the console
+  $("#chat-open").addEventListener("click", () => ($("#chat").hidden ? openChat() : closeChat()));
+  $("#chat-close").addEventListener("click", closeChat);
+  $("#chat-form").addEventListener("submit", (e) => { e.preventDefault(); const q = $("#chat-q"); askBot(q.value); q.value = ""; });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#chat").hidden) closeChat(); });
+}
+
+// ---------------------------------------------------------------- light / dark
+function setupTheme() {
+  const btn = $("#theme"), order = ["auto", "light", "dark"], names = { auto: "Theme: auto", light: "Theme: light", dark: "Theme: dark" };
+  let mode0 = store.get("gb:theme", "auto");
+  const apply = () => {
+    if (mode0 === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", mode0);
+    btn.textContent = { auto: "◐", light: "☀", dark: "☾" }[mode0]; btn.title = names[mode0]; btn.setAttribute("aria-label", names[mode0]);
+    const dark = mode0 === "dark" || (mode0 === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
+    document.querySelectorAll(".leaflet-tile-pane .leaflet-layer").forEach((l) => l.classList.toggle("tiles-dark", dark));
+  };
+  btn.addEventListener("click", () => { mode0 = order[(order.indexOf(mode0) + 1) % 3]; store.set("gb:theme", mode0); apply(); render(); });
+  apply();
 }
 
 // ---------------------------------------------------------------- live data
@@ -654,7 +849,7 @@ async function refresh() {
   const [s, v] = got;
   if (S && s.at === S.at) return;
   if (!B || s.day !== B.day || s.version !== B.version) { const b = await get(`board/${s.day}.json`); if (!b) return; B = b; buildIndex(); }
-  setLive(s, v); freshness(); render();
+  setLive(s, v); freshness(); render(); checkReminders();
 }
 
 async function main() {
@@ -671,11 +866,12 @@ async function main() {
   const b = await get(`board/${got[0].day}.json`);
   if (!b) { $("#view").replaceChildren(el("p", {}, "Today’s timetable is still loading. Try again in a few minutes.")); return; }
   B = b; buildIndex(); setLive(...got);
-  setupSearch(); freshness(); render(true);
+  setupSearch(); setupChat(); setupTheme(); freshness(); render(true);
+  if (qs.get("ask")) { openChat(); askBot(qs.get("ask")); }
   addEventListener("hashchange", () => render(true));
   setInterval(refresh, 75000);   // the live branch updates every ~2 minutes
   setInterval(freshness, 15000);
-  setInterval(() => render(), 60000);   // countdowns move on even between data updates
+  setInterval(() => { render(); checkReminders(); }, 60000);   // countdowns move on even between data updates
 }
 
 main();

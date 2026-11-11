@@ -1,0 +1,11 @@
+{
+  "name": "Ghost Bus Detector – Sheffield",
+  "short_name": "Ghost Bus",
+  "description": "Live bus times for every stop in Sheffield, checked against the buses’ own GPS, and the buses that never came.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0E1726",
+  "theme_color": "#0E1726",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
