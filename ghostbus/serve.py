@@ -18,9 +18,11 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 from . import config as C
+from .reports import router as reports_router
 
 log = logging.getLogger("ghostbus.serve")
 REFRESH = int(os.environ.get("MODEL_REFRESH_SECONDS", "300"))
@@ -82,8 +84,11 @@ async def lifespan(app: FastAPI):
         yield
 
 
-app = FastAPI(title="Ghost Bus Detector API", version="1.0", lifespan=lifespan,
-              description="Chance a timetabled Sheffield bus actually runs, from the champion model.")
+app = FastAPI(title="Ghost Bus Detector API", version="1.1", lifespan=lifespan,
+              description="Chance a timetabled Sheffield bus actually runs, from the champion model; passenger reports; push sign-ups.")
+app.add_middleware(CORSMiddleware, allow_origins=os.environ.get("CORS_ORIGINS", "https://mohammed-890.github.io").split(","),
+                   allow_methods=["GET", "POST", "DELETE"], allow_headers=["Content-Type"])
+app.include_router(reports_router)
 
 
 @app.middleware("http")
