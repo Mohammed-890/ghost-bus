@@ -2,137 +2,56 @@
 <html lang="en-GB">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Ghost Bus Detector – Sheffield live bus checker</title>
-  <meta name="description" content="Is your Sheffield bus actually coming? Live times for every bus in Sheffield, checked against GPS: on the road now, ran, or never turned up.">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Ghost Bus Detector – Sheffield</title>
+  <meta name="description" content="Live bus times for every stop in Sheffield, checked against the buses’ own GPS: where your bus is, how late it’s running, and which buses never turned up.">
+  <meta name="theme-color" content="#0E1726">
   <meta property="og:title" content="Ghost Bus Detector – Sheffield">
-  <meta property="og:description" content="Timetabled buses that never turn up, measured from live bus GPS, trip by trip.">
+  <meta property="og:description" content="Live bus times for every stop in Sheffield, checked against GPS, and the buses that never came.">
   <meta property="og:image" content="https://mohammed-890.github.io/ghost-bus/social.png">
   <meta name="twitter:card" content="summary_large_image">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230C0D0B'/%3E%3Crect x='14' y='14' width='36' height='32' rx='6' fill='none' stroke='%23FFB31A' stroke-width='5' stroke-dasharray='7 5'/%3E%3C/svg%3E">
-  <link rel="preload" href="fonts/doto-latin-900-normal.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="css/style.css?v=6">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230E1726'/%3E%3Crect x='14' y='14' width='36' height='32' rx='6' fill='none' stroke='%23A48BFF' stroke-width='5' stroke-dasharray='7 5'/%3E%3C/svg%3E">
+  <link rel="preload" href="fonts/atkinson-hyperlegible-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="css/app.css?v=7">
 </head>
 <body>
-  <header class="bar">
-    <div class="wrap bar-in">
-      <a class="brand" href="./"><span class="mark" aria-hidden="true"></span>Ghost Bus Detector</a>
-      <p class="status" id="status">Loading…</p>
-    </div>
-  </header>
-
-  <main>
-    <section class="lead wrap">
-      <h1>Is your bus actually coming?</h1>
-      <p class="sub">The sign at the stop shows the timetable. This one shows what really happened: every bus in Sheffield, checked against its own live GPS.</p>
-
-      <div class="sign" role="search">
-        <div class="sign-top">
-          <label class="vh" for="q">Your stop or route number</label>
-          <div class="finder-box">
-            <input id="q" type="search" autocomplete="off" spellcheck="false" placeholder="Type your stop or route"
-                   role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="q-list">
-            <ul id="q-list" class="q-list" role="listbox" hidden></ul>
-          </div>
-          <span class="led sign-clock" id="sign-clock" aria-hidden="true">--:--</span>
+  <a class="skip" href="#view">Skip to content</a>
+  <div class="app">
+    <aside class="panel" id="main" tabindex="-1">
+      <header class="top">
+        <a class="brand" href="#/"><span class="mark" aria-hidden="true"></span><span>Ghost Bus<small>Sheffield</small></span></a>
+        <span class="fresh" id="fresh"><i aria-hidden="true"></i><span>Live · </span><b id="fresh-age">connecting…</b></span>
+      </header>
+      <nav class="nav" aria-label="Sections">
+        <a href="#/" data-v="home">Live</a>
+        <a href="#/network" data-v="network">Network</a>
+        <a href="#/reliability" data-v="reliability">Reliability</a>
+        <a href="#/about" data-v="about">How it works</a>
+      </nav>
+      <div class="search" role="search">
+        <label class="vh" for="q">Search for a stop or route</label>
+        <div class="search-box">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+          <input id="q" type="search" autocomplete="off" spellcheck="false" placeholder="Search a stop or route number"
+                 role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="q-list">
+          <kbd aria-hidden="true">/</kbd>
+          <ul id="q-list" class="q-list" role="listbox" hidden></ul>
         </div>
-        <ol class="sign-rows" id="sign-rows" aria-label="Next buses at this stop"><li class="sign-row"><span class="rt"></span><span class="dest">Loading…</span><span class="when"></span></li></ol>
-        <div class="ticker" aria-hidden="true"><p class="led" id="ticker"></p></div>
+        <button type="button" class="near" id="near">Near me</button>
       </div>
-      <p class="sign-note">Rows that never light up are <b>ghost buses</b>: on the timetable, but no bus came. <span class="try" id="try"></span></p>
-      <p class="today" id="today" aria-live="polite"></p>
-    </section>
-
-    <section class="wrap block live" id="live" hidden>
-      <div class="live-head">
-        <div>
-          <p class="kicker" id="live-kind"></p>
-          <h2 id="live-title"></h2>
-          <p class="hint" id="live-meta"></p>
-        </div>
-      </div>
-      <div class="tabs" id="live-tabs" role="tablist"></div>
-      <div class="live-grid">
-        <ol class="deps" id="live-list"></ol>
-        <div id="live-map" class="live-map" role="img" aria-label="Map of this stop or route and its buses on the road now"></div>
-      </div>
-      <p class="small key">
-        <span class="pill o">On the road</span> a bus is reporting this trip right now.
-        <span class="pill p">Due</span> should be running, not confirmed yet.
-        <span class="pill r">Ran</span> a bus was seen doing it.
-        <span class="pill g">Never came</span> no bus seen, while the operator was reporting its other buses.
-        <span class="pill n">No live data</span> the operator wasn’t reporting, so we can’t tell. Times are UK time.
-      </p>
-    </section>
-
-    <section class="block now-block" id="now" hidden>
-      <div class="wrap">
-        <h2>Right now</h2>
-        <p class="hint" id="now-caption">Every bus reporting in Sheffield at the latest check.</p>
-      </div>
-      <div id="now-map" class="map now-map" role="img" aria-label="Map of buses in Sheffield at the latest check"></div>
-    </section>
-
-    <section class="hero wrap picture">
-      <h2 id="headline">Some buses on the timetable never come.</h2>
-      <p class="sub" id="subline">This site counts them, trip by trip, from the government’s live bus location feed.</p>
-      <div class="board" id="board" aria-hidden="true"></div>
-    </section>
-
-    <section class="wrap block" id="check">
-      <h2>Route history</h2>
-      <p class="hint">Every timetabled departure on a route, and how often a bus actually ran it over the past days.</p>
-      <label class="pick">
-        <span>Route</span>
-        <select id="route-select"><option value="">Choose a route</option></select>
-      </label>
-      <div id="route-view" class="route-view" hidden></div>
-      <p class="empty" id="route-empty" hidden></p>
-    </section>
-
-    <section class="wrap block split">
-      <div>
-        <h2>Least reliable routes</h2>
-        <p class="hint">Share of judged trips that never ran. Routes with fewer than 50 judged trips are left out.</p>
-        <ol class="league" id="league"></ol>
-      </div>
-      <div>
-        <h2>Recent ghost buses</h2>
-        <p class="hint">Scheduled, not seen anywhere on the route.</p>
-        <ul class="recent" id="recent"></ul>
-      </div>
-    </section>
-
-    <section class="block map-block">
-      <div class="wrap">
-        <h2>Where it happens</h2>
-        <p class="hint">Each line is a route, darker means more ghost buses.</p>
-      </div>
-      <div id="map" class="map" role="img" aria-label="Map of Sheffield bus routes coloured by ghost bus rate"></div>
-    </section>
-
-    <section class="wrap block" id="method">
-      <h2>How a bus becomes a ghost</h2>
-      <ol class="steps">
-        <li><strong>The timetable.</strong> Every trip operators have registered with the Bus Open Data Service for the day.</li>
-        <li><strong>The buses.</strong> Every bus in England reports its position to the same service. We record Sheffield’s every minute, around the clock.</li>
-        <li><strong>Matching.</strong> A trip <em>ran</em> if a bus reported that exact trip, or if a bus with no trip ID passed the trip’s stops in order, on time. One bus can’t run two trips at once.</li>
-        <li><strong>Fairness.</strong> A trip is only called a <em>ghost</em> if the feed was answering for the whole trip and the operator was visibly reporting its other buses at the time. Otherwise it is <em>not judged</em>, never counted against anyone.</li>
-      </ol>
-      <div class="facts" id="facts"></div>
-      <h3>Can it predict tomorrow?</h3>
-      <div id="model"></div>
-      <p class="small">“Ghost” means no bus was seen. Causes include cancellations, driver shortages and buses whose tracker was off. The data is published under the Open Government Licence. Not affiliated with any operator or the Department for Transport. <a href="https://github.com/Mohammed-890/ghost-bus">Code, raw data and method</a>.</p>
-    </section>
-  </main>
-
-  <footer class="foot wrap">
-    <p>Built by <a href="https://www.linkedin.com/in/mohammed-banabilh-6340553b0/">Mohammed Banabilh</a>. Contains public sector information licensed under the Open Government Licence v3.0.</p>
-  </footer>
-
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-  <script src="js/app.js?v=6" type="module"></script>
-  <script src="js/live.js?v=6" type="module"></script>
+      <div class="view" id="view" aria-live="polite"><p class="muted loading">Loading Sheffield’s buses…</p></div>
+      <footer class="foot">
+        Built by <a href="https://www.linkedin.com/in/mohammed-banabilh-6340553b0/">Mohammed Banabilh</a> ·
+        <a href="https://github.com/Mohammed-890/ghost-bus">Code</a> ·
+        Bus Open Data Service, Open Government Licence v3.0
+      </footer>
+    </aside>
+    <main class="mapwrap" aria-label="Live map">
+      <div id="map" role="img" aria-label="Map of Sheffield with every bus on the road, coloured by how late it is"></div>
+    </main>
+  </div>
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="js/main.js?v=7" type="module"></script>
 </body>
 </html>

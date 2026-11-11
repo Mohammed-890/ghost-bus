@@ -1,2 +1,1 @@
-Doto (c) The Doto Project Authors; Atkinson Hyperlegible (c) Braille Institute of America.
-Both are licensed under the SIL Open Font License 1.1: https://openfontlicense.org
+Atkinson Hyperlegible (c) Braille Institute of America, licensed under the SIL Open Font License 1.1: https://openfontlicense.org
