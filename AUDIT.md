@@ -101,3 +101,43 @@ Ranked by passenger value, then feasibility, competitive edge, cost and commerci
    - B2B: reliability dashboards for universities and councils.
 
    Payments go through Stripe Checkout and webhooks, with no card data handled here. Tickets only through operator or Passenger partnerships.
+
+## 7. Built in round two
+
+1. **Arrival confidence on every time.**
+   - High: on GPS, trip sent, fresh.
+   - Medium: GPS but matched by movement, GPS 4–10 min old, or timetable on a 97%+ route.
+   - Low: anything weaker.
+
+   The reasons are in the tooltip and on the trip page. The Medium level for matched buses rests on the live self-check (about 84% right).
+2. **Reliability dashboard** (`#/reliability/routes|operators|days|accuracy`):
+   - Every score shows its checked-trip count, a 95% Wilson range and a confidence word.
+   - "Not checked" (no tracking) is always kept apart from "never ran".
+   - Filters for operator, minimum observations and "only 5%+ missing", plus sorting.
+   - All-days or last-7-days views, operator comparison with daily trend lines, and city day-by-day figures.
+   - Route pages show day-by-day bars and a tappable record for every departure.
+3. **Measured live accuracy.** On each update, trip inference is scored against buses that send their trip. The route-delay estimate is scored leave-one-out against the buses being tracked, and compared with simply assuming "on time".
+4. **Map tools.** Buses on or off, stops on or off (shown from zoom 15.5, click a stop to open it), an operator filter, a manual refresh, and "Follow this bus" on any bus being tracked.
+5. **Passenger reports** on every trip page. Each report is checked against GPS straight away: agrees, disagrees, still coming, or can't confirm. It's saved on the device, and sent to the API when one is configured (`?api=`).
+   - Server: `ghostbus/reports.py` (SQLite, validation, per-device and per-IP rate limits).
+   - Verification levels: single, likely (2 devices), or confirmed (GPS agrees, or 3 devices within 30 min).
+   - Tested in `tests/test_reports.py`.
+6. **"You" page:**
+   - Theme, easy view and stops on the map.
+   - Alert types on or off, notification permission, and a test alert.
+   - Home and work, saved journeys with commute days, saved stops and routes.
+   - Journey history, your reports and travel stats.
+   - Download, restore or delete all your data.
+7. **Notifications** go through the service worker (better on phones). It has `push` and `notificationclick` handlers ready, and the API has `/push/subscribe`.
+8. **Data pipeline.** Daily series per route and operator, not-checked counts, and last-7-day counts are published by `publish.build()`.
+
+### Still needs hosting or external access
+
+| Feature | What's missing |
+|---|---|
+| Alerts with the site fully closed | Host the API (`uvicorn ghostbus.serve:app`). Create a VAPID key pair (`VAPID_PRIVATE_KEY`, public key in the site). Add a worker that runs the commute checks every 2 min and sends with `pywebpush`. |
+| Shared passenger reports | Host the API and set its URL in the site. Reports then pool across users with the verification levels above. |
+| Accounts and sync | Same API plus sign-in (email magic link or passkeys). The device data export format is already the sync format. |
+| Fares ("cheapest") | BODS fares data (NeTEx), not yet ingested. |
+| Trams | Supertram isn't in the bus feed that's used now; it needs its own GTFS source. |
+| Other regions | `config.py` holds one bounding box. A region plugin (box, GTFS region, landmarks) is the next refactor. BODS covers England only. |

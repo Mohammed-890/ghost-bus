@@ -47,6 +47,12 @@ def slug(s):
     return re.sub(r"[^A-Za-z0-9]+", "-", str(s)).strip("-").lower() or "route"
 
 
+def _daily(g):
+    """[[date, judged, ghosts, not judged], ...] for one route or operator, oldest first."""
+    d = g.groupby("service_date").agg(judged=("judged", "sum"), ghosts=("g", "sum"), unknown=("verdict", lambda v: int((v == "unknown").sum())))
+    return [[str(k), int(r.judged), int(r.ghosts), int(r.unknown)] for k, r in d.sort_index().iterrows()]
+
+
 def health_summary():
     files = sorted(C.HEALTH.glob("*.csv.gz"))
     if not files:
@@ -84,11 +90,17 @@ def build():
                   "ghost_rate": round(float(recent.g.mean()), 4) if len(recent) else None},
     })
 
-    daily = df.groupby("service_date").agg(scheduled=("trip_id", "size"), judged=("judged", "sum"), ghosts=("g", "sum")).reset_index()
+    daily = df.groupby("service_date").agg(scheduled=("trip_id", "size"), judged=("judged", "sum"), ghosts=("g", "sum"),
+                                           unknown=("verdict", lambda v: int((v == "unknown").sum()))).reset_index()
     _w("daily.json", daily.to_dict("records"))
 
-    ops = j.groupby("operator").agg(judged=("g", "size"), ghosts=("g", "sum")).reset_index()
+    df["unk"] = (df.verdict == "unknown").astype(int)
+    ops = df.groupby("operator").agg(scheduled=("trip_id", "size"), judged=("judged", "sum"), ghosts=("g", "sum"), unknown=("unk", "sum")).reset_index()
+    ops = ops[ops.judged > 0]
     ops["rate"] = (ops.ghosts / ops.judged).round(4)
+    ops["last7_judged"] = [int(recent[recent.operator == o].judged.sum()) for o in ops.operator]
+    ops["last7_ghosts"] = [int(recent[recent.operator == o].g.sum()) for o in ops.operator]
+    ops["daily"] = [_daily(df[df.operator == o]) for o in ops.operator]
     _w("operators.json", ops.sort_values("rate", ascending=False).to_dict("records"))
 
     # the champion's stored predictions for the next day (written by the daily job)
@@ -105,8 +117,9 @@ def build():
             continue
         rid = slug(f"{route}-{op}")
         by_hour = jg.assign(h=(jg.start_secs // 3600).astype(int) % 24).groupby("h").agg(n=("g", "size"), ghosts=("g", "sum"))
-        deps = jg.groupby(["direction_id", "start_secs", "from_stop", "to_stop"], dropna=False).agg(
-            days=("g", "size"), ghosts=("g", "sum")).reset_index()
+        deps = g.groupby(["direction_id", "start_secs", "from_stop", "to_stop"], dropna=False).agg(
+            days=("judged", "sum"), ghosts=("g", "sum"), unknown=("unk", "sum")).reset_index()
+        deps = deps[deps.days + deps.unknown > 0]
         if fc is not None:
             f = fc[fc.route == str(route)].groupby(["direction_id", "start_secs"]).p_runs.mean()
             deps["p_runs_next"] = [round(float(f.get((str(d), s), np.nan)), 3) if (str(d), s) in f.index else None
@@ -115,10 +128,13 @@ def build():
         _w(f"routes/{rid}.json", {
             "route": route, "operator": op, "id": rid,
             "by_hour": [[int(h), int(r.n), int(r.ghosts)] for h, r in by_hour.iterrows()],
+            "daily": _daily(g),
             "departures": deps.sort_values(["direction_id", "start_secs"]).drop(columns=["start_secs"]).to_dict("records"),
         })
         routes.append({"id": rid, "route": route, "operator": op, "scheduled": int(len(g)), "judged": int(len(jg)),
                        "ghosts": int(jg.g.sum()), "rate": round(float(jg.g.mean()), 4) if len(jg) else None,
+                       "unknown": int(g.unk.sum()),
+                       "last7_judged": int(len(jg[jg.service_date > last - timedelta(days=7)])),
                        "last7_ghosts": int(jg[jg.service_date > last - timedelta(days=7)].g.sum())})
     _w("routes.json", sorted(routes, key=lambda r: (-(r["rate"] or 0), r["route"])))
 
