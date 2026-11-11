@@ -170,8 +170,8 @@ function drawVehicles(focus) {          // focus: set of departure indices to hi
     const cls = i >= 0 ? delayClass(delay) : "unk";
     const m = L.marker([lat, lon], { icon: busIcon(route, bearing, cls, focus && on), zIndexOffset: on && focus ? 1000 : 0, keyboard: false });
     const what = i >= 0 ? `Route ${route} to ${headsign(i)} · ${delayText(delay)}` : `Route ${route || "?"} · not matched to a timetabled trip`;
-    if (canHover) m.bindTooltip(`${what} · tap for times`, { direction: "top", offset: [0, -14] });
-    m.on("click", () => openBusCard(i, v));
+    if (canHover) m.bindTooltip(`${what} · click for times`, { direction: "top", offset: [0, -14] });
+    m.on("click", () => { m.closeTooltip(); openBusCard(i, v); });
     m.addTo(vehLayer);
   }
 }
