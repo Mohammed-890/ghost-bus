@@ -7,7 +7,7 @@
 //   summary.json, routes.json, routes/<id>.json, recent_ghosts.json, shapes.json, model.json, monitoring.json
 // The two live files come from the `live` branch (updated every ~2 minutes); the copies on the site
 // (updated every ~13 minutes) are the fallback.
-import { createAssistant } from "./assistant.js?v=13";
+import { createAssistant } from "./assistant.js?v=14";
 
 const qs = new URLSearchParams(location.search);
 const DATA = qs.get("data") || "data";
@@ -146,12 +146,17 @@ function initMap() {
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors', maxZoom: 19, className: darkMap ? "tiles-dark" : "" }).addTo(map);
   ctxLayer = L.layerGroup().addTo(map);
+  selLayer = L.layerGroup().addTo(map);
   vehLayer = L.layerGroup().addTo(map);
+  const far = () => $("#map").classList.toggle("far", map.getZoom() < 13);
+  map.on("zoomend", far); far();
+  map.on("popupclose", (e) => { if (e.popup === mapCard) { cardFor = null; selLayer.clearLayers(); } });
 }
 function busIcon(route, bearing, cls, focus) {
   const arrow = bearing == null ? "" : `<i class="arr" style="transform:rotate(${bearing}deg)"></i>`;
   return L.divIcon({ className: "", iconSize: null, html: `<span class="bus ${cls}${focus ? " focus" : ""}">${arrow}<b>${route || "?"}</b></span>` });
 }
+const canHover = matchMedia("(hover: hover)").matches;
 function drawVehicles(focus) {          // focus: set of departure indices to highlight (others fade)
   if (!map || !V) return;
   vehLayer.clearLayers();
@@ -165,8 +170,8 @@ function drawVehicles(focus) {          // focus: set of departure indices to hi
     const cls = i >= 0 ? delayClass(delay) : "unk";
     const m = L.marker([lat, lon], { icon: busIcon(route, bearing, cls, focus && on), zIndexOffset: on && focus ? 1000 : 0, keyboard: false });
     const what = i >= 0 ? `Route ${route} to ${headsign(i)} · ${delayText(delay)}` : `Route ${route || "?"} · not matched to a timetabled trip`;
-    m.bindTooltip(`${what} · seen ${Math.round(age / 60)} min ago`, { direction: "top", offset: [0, -14] });
-    if (i >= 0) m.on("click", () => { location.hash = `#/trip/${i}`; });
+    if (canHover) m.bindTooltip(`${what} · tap for times`, { direction: "top", offset: [0, -14] });
+    m.on("click", () => openBusCard(i, v));
     m.addTo(vehLayer);
   }
 }
@@ -294,7 +299,7 @@ function setupMapTools() {
   if (!map) return;
   stopLayer = L.layerGroup().addTo(map);
   const ops = [...new Set(B.routes.map((r) => r[1]))].sort();
-  const Tools = L.Control.extend({ options: { position: "topright" }, onAdd() {
+  const Tools = L.Control.extend({ options: { position: "topleft" }, onAdd() {
     const box = L.DomUtil.create("div", "map-tools");
     L.DomEvent.disableClickPropagation(box); L.DomEvent.disableScrollPropagation(box);
     const bus = el("label", {}, el("input", { type: "checkbox", checked: mapPrefs.buses, onchange: (e) => { mapPrefs.buses = e.target.checked; drawVehicles(currentFocus); } }), " Buses");
@@ -303,7 +308,9 @@ function setupMapTools() {
       el("option", { value: "" }, "All operators"), ops.map((o) => el("option", { value: o }, o)));
     op.value = ops.includes(mapPrefs.op) ? mapPrefs.op : "";
     const re = el("button", { type: "button", "aria-label": "Refresh live data", title: "Refresh live data", onclick: async () => { re.disabled = true; re.textContent = "…"; await refresh(true); re.disabled = false; re.textContent = "⟳"; } }, "⟳");
-    box.append(el("div", { class: "row" }, bus, stp, re), op);
+    const panel = el("div", { class: "mt-panel", hidden: true }, el("div", { class: "row" }, bus, stp), op);
+    const tog = el("button", { type: "button", class: "mt-toggle", "aria-expanded": "false", onclick: () => { panel.hidden = !panel.hidden; tog.setAttribute("aria-expanded", String(!panel.hidden)); } }, "Layers");
+    box.append(el("div", { class: "row" }, tog, re), panel);
     return box;
   } });
   map.addControl(new Tools());
@@ -323,7 +330,7 @@ function drawStops() {
       if (!bd.contains([q[1], q[2]]) || seen.has(name)) continue;
       seen.add(name);
       L.circleMarker([q[1], q[2]], { radius: 6, color: ink(), weight: 2, fillColor: "#fff", fillOpacity: 1 })
-        .bindTooltip(name, { direction: "top" }).on("click", () => { location.hash = href("stop", name); }).addTo(stopLayer);
+        .bindTooltip(name, { direction: "top" }).on("click", () => openStopCard(name, [q[1], q[2]])).addTo(stopLayer);
       if (++n > 400) return;
     }
   }
@@ -377,6 +384,110 @@ function reportBox(i) {
   } }, "Send report");
   return section("Report a problem", el("div", { class: "report" }, kind, stopSel, note, send), out,
     el("p", { class: "muted small" }, "Each report is checked against the buses’ GPS. One report alone is never shown as fact."));
+}
+
+// ---------------------------------------------------------------- tap a bus or a stop on the map
+// A card opens right on the map: where the bus is going, how late, how sure we are, its next stops with
+// times, and how far along the route it is. It stays open and updates as new positions arrive.
+let mapCard = null, cardFor = null, selLayer = null;
+function vehicleOf(i) { return V?.v.find((v) => v[4] === i) || null; }
+function busCardNode(i, v) {
+  const now = nowSecs();
+  if (i < 0) {
+    const [, , , route, , , age] = v;
+    return el("div", { class: "mc" },
+      el("div", { class: "mc-top" }, el("span", { class: "mc-rt unk" }, route || "?"), el("div", {}, el("b", {}, `Route ${route || "?"}`), el("small", {}, "Not matched to a timetabled trip"))),
+      el("p", { class: "mc-note" }, `This bus is on GPS (seen ${Math.max(0, Math.round(age / 60))} min ago), but we can’t tell which journey it’s doing, so we don’t show times for it.`));
+  }
+  const r = routeOf(i), L0 = live(i), cs = calls(i), cf = confidence(i);
+  const pos = L0 ? Math.max(0, Math.min(cs.length - 1, L0.pos)) : 0;
+  const next = cs.filter((x) => x.k > Math.floor(pos)).slice(0, 4);
+  const pctDone = cs.length > 1 ? (pos / (cs.length - 1)) * 100 : 0;
+  const d = L0?.delay ?? null;
+  const status = d == null ? "No GPS" : d === 0 ? "On time" : d > 0 ? `${d} min late` : `${-d} min early`;
+  return el("div", { class: "mc" },
+    el("div", { class: "mc-top" },
+      el("span", { class: `mc-rt ${delayClass(d)}` }, r[0]),
+      el("div", {}, el("b", {}, `To ${headsign(i)}`), el("small", {}, r[1]))),
+    el("div", { class: "mc-status" }, el("b", { class: delayClass(d) }, status), confChip(cf), el("small", {}, L0 ? `GPS ${ageText(L0)}` : "")),
+    el("div", { class: "mc-prog", role: "img", "aria-label": `Stop ${Math.floor(pos) + 1} of ${cs.length}` },
+      el("i", { style: `width:${pctDone.toFixed(1)}%` }), el("span", { style: `left:${pctDone.toFixed(1)}%` })),
+    el("div", { class: "mc-ends" }, el("small", {}, shortStop(B.stops[cs[0].stop][0])), el("small", {}, `stop ${Math.floor(pos) + 1} of ${cs.length}`), el("small", {}, shortStop(B.stops[cs.at(-1).stop][0]))),
+    next.length ? el("ol", { class: "mc-stops" }, next.map((x) => {
+      const ex = expected(i, x.k, x.secs), m = Math.round((ex.secs - now) / 60);
+      return el("li", {}, el("a", { href: href("stop", B.stops[x.stop][0]) }, shortStop(B.stops[x.stop][0])),
+        el("span", {}, el("b", {}, m <= 0 ? "now" : `${m} min`), el("small", {}, hhmm(ex.secs))));
+    })) : el("p", { class: "mc-note" }, "At the end of its journey."),
+    el("div", { class: "mc-act" },
+      el("a", { class: "chip", href: `#/trip/${i}` }, "All stops"),
+      el("button", { type: "button", class: `chip ${following === i ? "" : "quiet"}`, onclick: (e) => { e.stopPropagation(); following = following === i ? null : i; setTimeout(() => { if (following != null) { map.setView([v[0], v[1]], Math.max(map.getZoom(), 15), { animate: !reduced }); } openBusCard(i); }, 0); } }, following === i ? "◉ Following" : "◎ Follow")));
+}
+function stopCardNode(name) {
+  const now = nowSecs(), ids = new Set(byStopName.get(name) || []), deps = [];
+  B.trips.forEach((t, i) => {
+    const s = t[6];
+    for (let k = 0; k < s.length - 2; k += 2) if (ids.has(s[k])) {
+      const secs = t[2] + s[k + 1] * 60, ex = expected(i, k / 2, secs), c = st(i);
+      if (!ex.passed && ex.secs >= now - 60 && ex.secs <= now + 2 * 3600 && c !== "G" && c !== "R") deps.push({ i, k: k / 2, secs, ex });
+      break;
+    }
+  });
+  deps.sort((a, b) => a.ex.secs - b.ex.secs);
+  return el("div", { class: "mc" },
+    el("div", { class: "mc-top" }, el("span", { class: "mc-rt stop" }, "⬤"), el("div", {}, el("b", {}, name.split("/")[0]), el("small", {}, name.includes("/") ? `Stop: ${name.split("/").slice(1).join("/")}` : "Bus stop"))),
+    deps.length ? el("ol", { class: "mc-stops deps" }, deps.slice(0, 5).map((d) => {
+      const m = Math.round((d.ex.secs - now) / 60), L0 = live(d.i);
+      return el("li", {}, el("a", { href: `#/trip/${d.i}` }, el("span", { class: "rt" }, routeOf(d.i)[0]), ` ${headsign(d.i)}`),
+        el("span", {}, el("b", { class: L0 ? delayClass(L0.delay) : "" }, m <= 0 ? "Due" : `${m} min`), confChip(confidence(d.i))));
+    })) : el("p", { class: "mc-note" }, "No more buses here in the next 2 hours."),
+    el("div", { class: "mc-act" }, el("a", { class: "chip", href: href("stop", name) }, "All departures")));
+}
+function drawSelection(i) {
+  selLayer.clearLayers();
+  if (i == null || i < 0) return;
+  const cs = calls(i), L0 = live(i), from = L0 ? Math.max(0, Math.floor(L0.pos)) : 0;
+  const ahead = cs.slice(from).map((x) => [B.stops[x.stop][1], B.stops[x.stop][2]]);
+  if (L0) ahead.unshift([L0.lat, L0.lon]);
+  if (ahead.length > 1) L.polyline(ahead, { color: ink(), weight: 5, opacity: 0.8, dashArray: "1 9", lineCap: "round" }).addTo(selLayer);
+  cs.slice(from + 1).forEach((x) => L.circleMarker([B.stops[x.stop][1], B.stops[x.stop][2]], { radius: 3.5, color: ink(), weight: 2, fillColor: "#fff", fillOpacity: 1 }).bindTooltip(`${hhmm(expected(i, x.k, x.secs).secs)} ${B.stops[x.stop][0]}`).addTo(selLayer));
+}
+// on phones the card slides up from the bottom instead of covering the small map
+const small = () => innerWidth < 900;
+let sheet = null;
+function showSheet(node, kind) {
+  if (!sheet) {
+    sheet = el("section", { class: "sheet", role: "dialog", "aria-label": "Details" });
+    document.body.append(sheet);
+  }
+  const close = el("button", { type: "button", class: "sheet-x", "aria-label": "Close", onclick: closeSheet }, "×");
+  sheet.replaceChildren(el("div", { class: "sheet-grip", "aria-hidden": "true" }), close, node);
+  sheet.dataset.kind = kind;
+  requestAnimationFrame(() => sheet.classList.add("open"));
+}
+function closeSheet() { if (sheet) sheet.classList.remove("open"); cardFor = null; selLayer?.clearLayers(); }
+function openBusCard(i, v) {
+  v = v || vehicleOf(i);
+  if (!v) return;
+  cardFor = { kind: "bus", i, v };
+  if (small()) { showSheet(busCardNode(i, v), "bus"); drawSelection(i); return; }
+  if (!mapCard) mapCard = L.popup({ className: "map-card", maxWidth: 320, minWidth: 260, autoPanPaddingTopLeft: [40, 110], autoPanPaddingBottomRight: [60, 30], offset: [0, -12] });
+  mapCard.setLatLng([v[0], v[1]]).setContent(busCardNode(i, v));
+  if (!map.hasLayer(mapCard)) mapCard.openOn(map);
+  drawSelection(i);
+}
+function openStopCard(name, latlng) {
+  cardFor = { kind: "stop", name, latlng };
+  if (small()) { showSheet(stopCardNode(name), "stop"); selLayer.clearLayers(); return; }
+  if (!mapCard) mapCard = L.popup({ className: "map-card", maxWidth: 320, minWidth: 260, autoPanPaddingTopLeft: [40, 110], autoPanPaddingBottomRight: [60, 30], offset: [0, -4] });
+  mapCard.setLatLng(latlng).setContent(stopCardNode(name));
+  if (!map.hasLayer(mapCard)) mapCard.openOn(map);
+  selLayer.clearLayers();
+}
+function refreshCard() {             // after new data: move the card with the bus and update its numbers
+  if (!cardFor) return;
+  if (!(sheet?.classList.contains("open")) && !(mapCard && map.hasLayer(mapCard))) return;
+  if (cardFor.kind === "bus") { const v = cardFor.i >= 0 ? vehicleOf(cardFor.i) : null; if (v) openBusCard(cardFor.i, v); }
+  else openStopCard(cardFor.name, cardFor.latlng);
 }
 
 // one departure row, used by stops, routes and lists
@@ -561,8 +672,29 @@ VIEWS.plan = (fromKey, toKey, whenKey) => {
   } else result = el("p", { class: "muted" }, "Pick where you’re starting and where you’re going. You’ll get the fastest, the most reliable, the least walking and the fewest changes, using live bus positions. Buses that look like they won’t come are left out, and one change is allowed, including a short walk between nearby stops.");
   const saved = fromIt && toIt && fromIt.key !== toIt.key ? journeySaveButton(fromIt, toIt) : null;
   const note = fromIt && toIt ? el("p", { class: "muted small" }, "How the “likely to work out” figure is made: a bus tracked by GPS counts as 99%, otherwise its route’s share of buses that ran over the days checked, lowered for recent trouble or a tight change. It’s an estimate, not a promise. Fares and step-free access aren’t shown because there’s no verified data for them yet.") : null;
+  // drag to see how the options change if you leave later
+  let slide = null;
+  if (fromIt && toIt && fromIt.key !== toIt.key && when.mode !== "by") {
+    const base = nowSecs(), start = when.mode === "at" && when.secs != null ? Math.max(0, Math.round((when.secs - base) / 300) * 5) : 0;
+    const lab = el("b", {}, start ? `in ${start} min (${hhmm(base + start * 60)})` : "now");
+    const holder = el("div", {}, result);
+    let timer = null;
+    const input = el("input", { type: "range", min: 0, max: 180, step: 5, value: start, "aria-label": "Leave in how many minutes",
+      oninput: (e) => {
+        const m = +e.target.value; lab.textContent = m ? `in ${m} min (${hhmm(base + m * 60)})` : "now";
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          const r = bot.options(fromIt, toIt, m ? { after: base + m * 60 } : {});
+          holder.replaceChildren(r.opts.length ? el("div", { class: "options" }, r.opts.map((o, n) => optionCard(o, n === 0))) : el("p", { class: "muted" }, "No buses for that time, direct or with one change."));
+          if (map && r.opts[0]) drawPlanMap(fromIt, toIt, r.opts[0]);
+        }, 90);
+      },
+      onchange: (e) => { const m = +e.target.value; history.replaceState(null, "", planHref(fromKey, toKey, m ? whenSeg("at", base + m * 60) : "")); current.extra = m ? whenSeg("at", base + m * 60) : ""; } });
+    slide = el("div", { class: "plan-slide" }, el("label", {}, "Leave ", lab), input, el("div", { class: "gaxis" }, el("small", {}, "now"), el("small", {}, "+1 h"), el("small", {}, "+2 h"), el("small", {}, "+3 h")));
+    result = holder;
+  }
   return [el("div", { class: "head" }, el("p", { class: "kicker" }, "Journey planner"), el("h2", {}, "Plan a bus journey")),
-    el("div", { class: "plan-form" }, field("plan-from", "Starting stop", fromIt, toKey, "from"), field("plan-to", "Destination stop", toIt, fromKey, "to"), whenRow), quick, saved, result, note];
+    el("div", { class: "plan-form" }, field("plan-from", "Starting stop", fromIt, toKey, "from"), field("plan-to", "Destination stop", toIt, fromKey, "to"), whenRow), quick, saved, slide, result, note];
 };
 function optionCard(o, first) {
   const j = o.j, now = nowSecs();
@@ -697,52 +829,50 @@ function locateFrom(toKey) {
 // ---------------------------------------------------------------- views
 let current = { kind: "home" };
 
+let homeTab = "problems";
 VIEWS.home = () => {
   const c = S.counts || {}, now = nowSecs();
   const ran = (c.R || 0) + (c.O || 0), ghosts = c.G || 0;
-  const late = S.live.filter((x) => x[1] >= 5).length;
-  const f = S.feed || {};
+  const liveN = S.live.length, late = S.live.filter((x) => x[1] >= 5).length, onTime = S.live.filter((x) => x[1] >= -1 && x[1] <= 2).length;
   const header = el("div", { class: "intro" },
     el("h1", {}, "Is your bus actually coming?"),
-    el("p", {}, "Live times for every bus in Sheffield, from every operator, checked against the buses’ own GPS. Each time says whether a real bus is tracked or it’s only the timetable, and you’re warned when a bus looks like it won’t come."));
-  const stats = el("div", { class: "stats" },
-    stat(num(f.buses ?? V?.v?.length), "buses on the road now", "live"),
-    stat(f.buses ? pct(((f.reported || 0) + (f.inferred || 0)) / f.buses, 0) : "–", "matched to their timetabled trip"),
-    stat(num(ran), "buses ran today"),
-    stat(num(ghosts), `never came today${ran + ghosts ? ` (${pct(ghosts / (ran + ghosts))})` : ""}`, "ghost"),
-    stat(num(late), "running 5+ min late now", "late"));
-  const fv = favs();
-  const fav = fv.length ? section("Saved", el("div", { class: "chips" }, fv.map((x) => el("a", { class: "chip", href: href(x.kind, x.key) }, x.kind === "route" ? x.label : shortStop(x.label))))) : null;
-  const rec = store.get("gb:recent", []).filter((x) => !isFav(x.kind, x.key));
-  const recent = rec.length ? section("Recently viewed", el("div", { class: "chips" }, rec.map((x) => el("a", { class: "chip quiet", href: href(x.kind, x.key) }, x.kind === "route" ? x.label : shortStop(x.label))))) : null;
-  const picks = ["Sheffield Interchange (all stands)", "Meadowhall Interchange (all stands)", "Arundel Gate (all stands)"].map((k) => findItem("stop", k)).filter(Boolean);
-  const popular = section("Popular stops", el("div", { class: "chips" }, picks.map((x) => el("a", { class: "chip quiet", href: href("stop", x.key) }, x.label))));
-  // ghost buses in the last 90 minutes
+    el("p", {}, canHover ? "Live GPS for every bus in Sheffield. Click any bus on the map for its times." : "Live GPS for every bus in Sheffield. Tap any bus on the map for its times."));
+  const tile = (v, w, cls, hrefTo) => el(hrefTo ? "a" : "div", { class: `tile ${cls || ""}`, href: hrefTo || null }, el("b", {}, v), el("span", {}, w));
+  const stats = el("div", { class: "tiles" },
+    tile(num(liveN), "buses on GPS now", "live"),
+    tile(liveN ? pct(onTime / liveN, 0) : "–", "of them on time"),
+    tile(num(late), "5+ min late", "late"),
+    tile(num(ghosts), "never came today", "ghost", "#/reliability/days"));
+  const pl = places(), js = journeysSaved(), fv = favs();
+  const quick = el("div", { class: "quick" },
+    el("a", { class: "qbtn", href: "#/plan" }, el("i", { "aria-hidden": "true" }, "➜"), "Plan a trip"),
+    el("button", { type: "button", class: "qbtn", onclick: () => $("#near").click() }, el("i", { "aria-hidden": "true" }, "◎"), "Near me"),
+    pl.home ? el("a", { class: "qbtn", href: planHref("", pl.home.key) }, el("i", { "aria-hidden": "true" }, "⌂"), "Take me home") : null,
+    pl.home ? null : el("a", { class: "qbtn", href: "#/play" }, el("i", { "aria-hidden": "true" }, "👻"), "Ghost game"));
+  const mine = js.length ? section("Your journeys", el("div", { class: "jcards" }, js.map((j) => journeyCard(j)))) : null;
+  const saved = [...fv.map((x) => ({ ...x, star: true })), ...store.get("gb:recent", []).filter((x) => !isFav(x.kind, x.key)).slice(0, 4)];
+  const picks = saved.length ? saved : ["Sheffield Interchange (all stands)", "Meadowhall Interchange (all stands)", "Arundel Gate (all stands)"].map((k) => findItem("stop", k)).filter(Boolean).map((x) => ({ kind: "stop", key: x.key, label: x.label }));
+  const shortcuts = section(saved.length ? "Your stops and routes" : "Popular stops", el("div", { class: "chips" }, picks.map((x) =>
+    el("a", { class: `chip ${x.star ? "" : "quiet"}`, href: href(x.kind, x.key) }, x.star ? "★ " : "", x.kind === "route" ? x.label : shortStop(x.label)))));
+  // right now: one box, three views
+  const alerts = routeAlerts().slice(0, 6);
   const justGhosts = B.trips.map((t, i) => [t, i]).filter(([t, i]) => st(i) === "G" && t[3] <= now && t[3] >= now - 5400).sort((a, b) => b[0][3] - a[0][3]).slice(0, 6);
-  const ghostSec = section("Never came, last 90 minutes", justGhosts.length
-    ? el("div", { class: "list" }, justGhosts.map(([t, i]) => depRow(i, t[2], 0, now, `from ${shortStop(t[4])}`)))
-    : el("p", { class: "muted" }, "None in the last 90 minutes."));
-  const worst = [...S.live].sort((a, b) => b[1] - a[1]).slice(0, 6);
-  const lateSec = section("Most delayed right now", worst.length && worst[0][1] > 0
-    ? el("div", { class: "list" }, worst.map(([i]) => { const k = Math.min(calls(i).length - 1, Math.max(0, Math.ceil(live(i).pos))); const cl = calls(i)[k]; return depRow(i, cl ? cl.secs : trip(i)[2], k, now, whereIs(i)); }))
-    : el("p", { class: "muted" }, "Nothing is running late right now."));
+  const worst = [...S.live].sort((a, b) => b[1] - a[1]).slice(0, 6).filter((x) => x[1] > 0);
+  const views = {
+    problems: () => alerts.length
+      ? el("div", { class: "alerts" }, alerts.map((a) => el("a", { class: "alert-row", href: href("route", slug(`${B.routes[a.ri][0]}-${B.routes[a.ri][1]}`)) },
+        el("span", { class: "rt" }, B.routes[a.ri][0]), el("span", {}, el("b", {}, B.routes[a.ri][1]), el("small", {}, `${a.why.join(" · ")}`)))))
+      : el("p", { class: "muted empty" }, "✓ No routes with problems right now."),
+    ghosts: () => justGhosts.length ? el("div", { class: "list" }, justGhosts.map(([t, i]) => depRow(i, t[2], 0, now, `from ${shortStop(t[4])}`))) : el("p", { class: "muted empty" }, "✓ Every bus turned up in the last 90 minutes."),
+    late: () => worst.length ? el("div", { class: "list" }, worst.map(([i]) => { const k = Math.min(calls(i).length - 1, Math.max(0, Math.ceil(live(i).pos))); const cl = calls(i)[k]; return depRow(i, cl ? cl.secs : trip(i)[2], k, now, whereIs(i)); })) : el("p", { class: "muted empty" }, "✓ Nothing is running late right now."),
+  };
+  const body = el("div", {}, views[homeTab]());
+  const seg = tabs([["problems", `Problems${alerts.length ? ` (${alerts.length})` : ""}`], ["ghosts", `Never came${justGhosts.length ? ` (${justGhosts.length})` : ""}`], ["late", "Most late"]], homeTab, (k) => { homeTab = k; render(); });
+  const play = el("a", { class: "play-card", href: "#/play" }, el("span", { class: "play-ico", "aria-hidden": "true" }, "👻"),
+    el("span", {}, el("b", {}, "Spot the ghost"), el("small", {}, "Which bus is more likely to let you down? A quick game with real Sheffield data.")), el("span", { class: "play-go", "aria-hidden": "true" }, "Play"));
   ctxLayer?.clearLayers(); drawVehicles(null);
   if (map && !current.fitted) { fit(V.v.map((v) => [v[0], v[1]]), 12.5); current.fitted = true; }
-  const alerts = routeAlerts().slice(0, 6);
-  const alertSec = section("Problems right now", alerts.length
-    ? el("div", { class: "alerts" }, alerts.map((a) => el("a", { class: "alert-row", href: href("route", slug(`${B.routes[a.ri][0]}-${B.routes[a.ri][1]}`)) },
-        el("span", { class: "rt" }, B.routes[a.ri][0]), el("span", {}, el("b", {}, B.routes[a.ri][1]), el("small", {}, `${a.why.join(" · ")}`)))))
-    : el("p", { class: "muted" }, "No routes with problems right now."));
-  const ask = el("button", { type: "button", class: "ask-card", onclick: () => openChat() },
-    el("b", {}, "Not sure? Just ask."), el("span", {}, "“When’s the next 52 from Arundel Gate?” · “How do I get to Meadowhall?”"));
-  const pl = places(), js = journeysSaved();
-  const trips0 = el("div", { class: "chips" },
-    el("a", { class: "chip", href: "#/plan" }, "Plan a journey"),
-    pl.home ? el("a", { class: "chip quiet", href: `#/plan//${encodeURIComponent(pl.home.key)}` }, "🏠 Take me home") : null,
-    pl.work ? el("a", { class: "chip quiet", href: `#/plan//${encodeURIComponent(pl.work.key)}` }, "💼 To work") : null,
-    js.length ? null : el("span", { class: "muted small" }, "Plan a journey and tap “Save this journey” to see it here with live times and alerts."));
-  const mine = js.length ? section("Your journeys", el("div", { class: "jcards" }, js.map(journeyCard)), el("p", { class: "muted small" }, "Alerts work while Ghost Bus is open in a tab.")) : null;
-  return [header, mine, ask, stats, section("Journeys", trips0), fav, recent, popular, alertSec, ghostSec, lateSec, legendNote()];
+  return [header, stats, quick, mine, shortcuts, section("Right now", seg, body), play, legendNote()];
 };
 
 function legendNote() {
@@ -1277,6 +1407,62 @@ VIEWS.me = () => {
   return [el("div", { class: "head" }, el("p", { class: "kicker" }, "You"), el("h2", {}, "Your Ghost Bus")), statsSec, commutes, placesSec, favSec, notes, settings, histSec, repSec, dataSec];
 };
 
+// ---------------------------------------------------------------- spot the ghost: a small game with real data
+// Two kinds of round: pick which of two routes misses more buses, or drag a slider to guess a route's miss
+// rate. Every number is the real record (routes with 150+ checked trips), shown with how many trips it's from.
+const game = { round: 0, score: 0, streak: 0, q: null, answered: false, rounds: 8 };
+function gamePool() { return R.filter((r) => r.judged >= 150 && r.rate != null); }
+function newQuestion() {
+  const pool = gamePool(), pick = () => pool[Math.floor(Math.random() * pool.length)];
+  if (pool.length < 4) return null;
+  if (game.round % 2 === 0) {
+    for (let n = 0; n < 50; n++) { const a = pick(), b = pick(); if (a.id !== b.id && Math.abs(a.rate - b.rate) >= 0.015) return { type: "pair", a, b }; }
+  }
+  return { type: "slider", a: pick(), guess: 5 };
+}
+VIEWS.play = () => {
+  if (!game.q && game.round < game.rounds) game.q = newQuestion();
+  const best = store.get("gb:best", 0);
+  const head = el("div", { class: "head" }, el("p", { class: "kicker" }, "Spot the ghost"), el("h2", {}, "Which bus lets Sheffield down?"),
+    el("p", { class: "muted" }, "Real records from every trip we’ve checked. Guess, then see the answer."));
+  const bar = el("div", { class: "game-bar" }, el("span", {}, `Round ${Math.min(game.round + 1, game.rounds)} of ${game.rounds}`), el("span", {}, `Score ${game.score}`), el("span", {}, game.streak > 1 ? `🔥 ${game.streak} in a row` : ""), el("span", {}, `Best ${best}`));
+  if (game.round >= game.rounds) {
+    if (game.score > best) store.set("gb:best", game.score);
+    const msg = game.score >= 7 ? "Ghost hunter. You know Sheffield’s buses better than most." : game.score >= 4 ? "Not bad. The ghosts are sneaky." : "The ghosts got you this time.";
+    return [head, el("div", { class: "game-end" }, el("b", { class: "big" }, `${game.score} / ${game.rounds}`), el("p", {}, msg),
+      game.score > best ? el("p", { class: "ok" }, "New best score!") : null,
+      el("div", { class: "chips" }, el("button", { type: "button", class: "chip", onclick: () => { Object.assign(game, { round: 0, score: 0, streak: 0, q: null, answered: false }); render(); } }, "Play again"),
+        el("a", { class: "chip quiet", href: "#/reliability" }, "See every route")))];
+  }
+  const q = game.q;
+  if (!q) return [head, el("p", { class: "muted" }, "Not enough data for the game yet. Come back in a few days.")];
+  const next = el("button", { type: "button", class: "chip", onclick: () => { game.round++; game.q = null; game.answered = false; render(); } }, game.round + 1 >= game.rounds ? "See my score" : "Next round →");
+  const routeCard = (r, onPick, reveal, win) => el(onPick ? "button" : "div", { type: onPick ? "button" : null, class: `gcard${reveal ? (win ? " win" : " lose") : ""}`, onclick: onPick },
+    el("span", { class: "mc-rt" }, r.route), el("b", {}, r.operator),
+    reveal ? el("span", { class: "gstat" }, el("span", { class: "gbar" }, el("i", { style: `width:${Math.min(100, (r.rate / 0.15) * 100)}%` })),
+      el("b", {}, `${pct(r.rate)} never came`), el("small", {}, `${num(r.ghosts)} of ${num(r.judged)} checked trips`)) : el("small", {}, "Tap if this one misses more"));
+  if (q.type === "pair") {
+    const worse = q.a.rate > q.b.rate ? q.a : q.b;
+    const pickIt = (r) => () => { if (game.answered) return; game.answered = true; q.chosen = r.id; if (r.id === worse.id) { game.score++; game.streak++; } else game.streak = 0; render(); };
+    const done = game.answered;
+    return [head, bar, el("p", { class: "gq" }, "Which route had more buses that never turned up?"),
+      el("div", { class: "gpair" }, routeCard(q.a, done ? null : pickIt(q.a), done, q.a.id === worse.id), el("span", { class: "vs" }, "or"), routeCard(q.b, done ? null : pickIt(q.b), done, q.b.id === worse.id)),
+      done ? el("div", { class: "gresult" }, el("p", {}, el("b", {}, q.chosen === worse.id ? "Right! " : "Not this time. "), `Route ${worse.route} (${worse.operator}) missed ${pct(worse.rate)} of its buses.`), next) : null];
+  }
+  // slider round
+  const r = q.a, max = 20;
+  const out = el("b", { class: "gguess" }, `${q.guess.toFixed(1)}%`);
+  const slider = el("input", { type: "range", min: 0, max, step: 0.5, value: q.guess, "aria-label": "Your guess, percent of buses that never came", disabled: game.answered,
+    oninput: (e) => { q.guess = +e.target.value; out.textContent = `${q.guess.toFixed(1)}%`; } });
+  const truth = r.rate * 100, off = Math.abs(q.guess - truth);
+  const lock = el("button", { type: "button", class: "chip", onclick: () => { game.answered = true; const pts = off <= 1.5 ? 1 : 0; game.score += pts; game.streak = pts ? game.streak + 1 : 0; render(); } }, "Lock in my guess");
+  const scale = el("div", { class: "gscale" }, slider, game.answered ? el("span", { class: "gtruth", style: `left:${Math.min(100, (truth / max) * 100)}%`, title: `Real: ${truth.toFixed(1)}%` }) : null);
+  return [head, bar, el("p", { class: "gq" }, "What share of this route’s buses never turned up?"),
+    el("div", { class: "gcard solo" }, el("span", { class: "mc-rt" }, r.route), el("b", {}, r.operator), el("small", {}, `${num(r.judged)} trips checked`)),
+    el("div", { class: "gslide" }, out, scale, el("div", { class: "gaxis" }, el("small", {}, "0%"), el("small", {}, "10%"), el("small", {}, `${max}%`))),
+    game.answered ? el("div", { class: "gresult" }, el("p", {}, el("b", {}, off <= 1.5 ? "Spot on! " : off <= 4 ? "Close. " : "Way off. "), `The real answer: ${truth.toFixed(1)}% (${num(r.ghosts)} of ${num(r.judged)} trips). ${off <= 1.5 ? "+1 point." : "Within 1.5 points scores."}`), next) : lock];
+};
+
 VIEWS.about = () => {
   const f = S.feed || {}, chk = f.check || {};
   const box = el("div", {});
@@ -1322,6 +1508,8 @@ function render(reset) {
   if (!B || !S) return;
   const h = parseHash();
   const same = h.kind === current.kind && h.key === current.key && h.sub === current.sub && h.extra === current.extra;
+  if (!same && map && mapCard && map.hasLayer(mapCard)) map.closePopup(mapCard);
+  if (!same && sheet?.classList.contains("open")) closeSheet();
   if (!same) current = { ...h, fitted: false, filter: h.kind === current.kind && h.key === current.key ? current.filter : null };
   const fn = VIEWS[h.kind] || VIEWS.home;
   const panel = $("#view"), top = panel.scrollTop;
@@ -1537,7 +1725,7 @@ async function refresh(manual) {
   const [s, v] = got;
   if (S && s.at === S.at) { if (manual) toast(`Already up to date: the buses last reported ${Math.max(0, Math.round((Date.now() - new Date(S.at).getTime()) / 60000))} min ago. New data every ~2 min.`); return; }
   if (!B || s.day !== B.day || s.version !== B.version) { const b = await get(`board/${s.day}.json`); if (!b) return; B = b; buildIndex(); }
-  setLive(s, v); freshness(); render(); followBus(); checkReminders(); checkCommutes();
+  setLive(s, v); freshness(); render(); followBus(); refreshCard(); checkReminders(); checkCommutes();
 }
 
 async function main() {
@@ -1559,7 +1747,7 @@ async function main() {
   addEventListener("hashchange", () => render(true));
   setInterval(refresh, 75000);   // the live branch updates every ~2 minutes
   setInterval(freshness, 15000);
-  setInterval(() => { render(); checkReminders(); checkCommutes(); }, 60000);   // countdowns move on even between data updates
+  setInterval(() => { render(); refreshCard(); checkReminders(); checkCommutes(); }, 60000);   // countdowns move on even between data updates
 }
 
 main();
