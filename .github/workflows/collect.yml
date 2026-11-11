@@ -74,11 +74,23 @@ jobs:
             done
             echo "::warning::live status push skipped this round"
           }
+          live_loop() {  # every 2 minutes: where every bus is and how late, as one small force-pushed commit on 'live'
+            out="$RUNNER_TEMP/live"; mkdir -p "$out"; git -C "$out" init -q
+            git -C "$out" config http.https://github.com/.extraheader "$(git config --get http.https://github.com/.extraheader)"
+            while true; do
+              sleep 120
+              python -m ghostbus.board --live "$out" > /dev/null 2>&1 || continue
+              (cd "$out" && git add -A && git commit -qm "live $(date -u +%H:%M:%SZ)" && git push -qf "https://github.com/$GITHUB_REPOSITORY.git" HEAD:live) > /dev/null 2>&1 || true
+            done
+          }
+          live_loop &
+          LIVE_PID=$!
           for round in 1 2 3 4; do
             python -m ghostbus.collect --minutes 13 || echo "::warning::collector round $round stopped early"
             (cd store && save_store)
             publish_site
           done
+          kill "$LIVE_PID" 2> /dev/null || true
         env:
           BODS_API_KEY: ${{ secrets.BODS_API_KEY }}
           GHOSTBUS_DATA: store
