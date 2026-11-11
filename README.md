@@ -10,19 +10,23 @@ A "ghost bus" is on the timetable and often on the arrival board, but never come
 
 ## What it looks like
 
-> These screenshots use **simulated data** to show the design (it says so on each image). The live site only ever shows real results, and real screenshots replace these once collection has run.
+Real screenshots of the live site.
 
-| Home | On a phone |
+| Live map: click any bus for its times | On a phone |
 |---|---|
-| ![Home page](docs/img/preview-home.png) | <img src="docs/img/preview-phone.png" width="260" alt="Phone view of a route"> |
+| ![Live map with a bus card open](docs/img/app-home.jpg) | <img src="docs/img/app-phone.png" width="260" alt="Phone view with a bus card"> |
 
-**Check your bus:** every timetabled departure on a route, and how often a bus actually ran it. Dashed purple departures miss 3 in 10 times or more.
+**Journey planner:** fastest, most reliable, least walking and fewest changes, each with the reason it was picked and how likely it is to work out. Drag the slider to leave later.
 
-![Route view](docs/img/preview-route.png)
+![Journey planner](docs/img/app-plan.jpg)
 
-**Least reliable routes and recent ghost buses**
+**Reliability:** every route and operator, with how many trips each score is based on and a 95% range. Trips with no tracking are "not checked", never counted as ghosts.
 
-![League table](docs/img/preview-league.png)
+![Reliability dashboard](docs/img/app-reliability.jpg)
+
+**Spot the ghost:** a quick game with the real records. Which route lets Sheffield down more?
+
+![Spot the ghost game](docs/img/app-game.jpg)
 
 ## How it works
 
