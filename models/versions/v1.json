@@ -124,6 +124,6 @@
     "promoted": true,
     "reason": "challenger Brier 0.02108 vs baseline 0.02347"
   },
-  "status": "champion",
-  "reason": ""
+  "status": "retired",
+  "reason": "replaced by v5"
 }
