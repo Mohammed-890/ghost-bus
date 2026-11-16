@@ -1,0 +1,170 @@
+{
+  "version": "7",
+  "created": "2026-11-16T13:07:39+00:00",
+  "meta": {
+    "trained_through": "2026-11-15",
+    "n_train": 45309,
+    "test_brier": 0.05534,
+    "report": {
+      "status": "ready",
+      "train_days": [
+        "2026-11-04",
+        "2026-11-12"
+      ],
+      "test_days": [
+        "2026-11-13",
+        "2026-11-15"
+      ],
+      "n_train": 35473,
+      "n_test": 9836,
+      "test_ghost_rate": 0.0635,
+      "constant": {
+        "brier": 0.06007,
+        "log_loss": 0.2428,
+        "roc_auc": 0.5,
+        "avg_precision": 0.064,
+        "ghosts_in_riskiest_10pct": 0.13
+      },
+      "history": {
+        "brier": 0.05635,
+        "log_loss": 0.2304,
+        "roc_auc": 0.709,
+        "avg_precision": 0.189,
+        "ghosts_in_riskiest_10pct": 0.304
+      },
+      "model": {
+        "brier": 0.05534,
+        "log_loss": 0.2198,
+        "roc_auc": 0.723,
+        "avg_precision": 0.212,
+        "ghosts_in_riskiest_10pct": 0.333
+      },
+      "calibration": [
+        {
+          "predicted": 0.028,
+          "actual": 0.046,
+          "n": 8688
+        },
+        {
+          "predicted": 0.132,
+          "actual": 0.13,
+          "n": 768
+        },
+        {
+          "predicted": 0.24,
+          "actual": 0.191,
+          "n": 183
+        },
+        {
+          "predicted": 0.352,
+          "actual": 0.368,
+          "n": 68
+        },
+        {
+          "predicted": 0.444,
+          "actual": 0.407,
+          "n": 54
+        },
+        {
+          "predicted": 0.545,
+          "actual": 0.543,
+          "n": 35
+        },
+        {
+          "predicted": 0.635,
+          "actual": 0.538,
+          "n": 39
+        }
+      ]
+    },
+    "version": "7"
+  },
+  "report": {
+    "status": "ready",
+    "train_days": [
+      "2026-11-04",
+      "2026-11-12"
+    ],
+    "test_days": [
+      "2026-11-13",
+      "2026-11-15"
+    ],
+    "n_train": 35473,
+    "n_test": 9836,
+    "test_ghost_rate": 0.0635,
+    "constant": {
+      "brier": 0.06007,
+      "log_loss": 0.2428,
+      "roc_auc": 0.5,
+      "avg_precision": 0.064,
+      "ghosts_in_riskiest_10pct": 0.13
+    },
+    "history": {
+      "brier": 0.05635,
+      "log_loss": 0.2304,
+      "roc_auc": 0.709,
+      "avg_precision": 0.189,
+      "ghosts_in_riskiest_10pct": 0.304
+    },
+    "model": {
+      "brier": 0.05534,
+      "log_loss": 0.2198,
+      "roc_auc": 0.723,
+      "avg_precision": 0.212,
+      "ghosts_in_riskiest_10pct": 0.333
+    },
+    "calibration": [
+      {
+        "predicted": 0.028,
+        "actual": 0.046,
+        "n": 8688
+      },
+      {
+        "predicted": 0.132,
+        "actual": 0.13,
+        "n": 768
+      },
+      {
+        "predicted": 0.24,
+        "actual": 0.191,
+        "n": 183
+      },
+      {
+        "predicted": 0.352,
+        "actual": 0.368,
+        "n": 68
+      },
+      {
+        "predicted": 0.444,
+        "actual": 0.407,
+        "n": 54
+      },
+      {
+        "predicted": 0.545,
+        "actual": 0.543,
+        "n": 35
+      },
+      {
+        "predicted": 0.635,
+        "actual": 0.538,
+        "n": 39
+      }
+    ]
+  },
+  "decision": {
+    "triggers": [
+      "data drift (op_rate_7d PSI 1.38)"
+    ],
+    "test_days": [
+      "2026-11-13",
+      "2026-11-15"
+    ],
+    "challenger_brier": 0.05534,
+    "champion_brier": 0.05534,
+    "champion_version": "5",
+    "promoted": false,
+    "reason": "challenger Brier 0.05534 vs champion 0.05534 on the same days"
+  },
+  "status": "rejected",
+  "reason": "challenger Brier 0.05534 vs champion 0.05534 on the same days"
+}
