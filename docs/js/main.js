@@ -7,7 +7,7 @@
 //   summary.json, routes.json, routes/<id>.json, recent_ghosts.json, shapes.json, model.json, monitoring.json
 // The two live files come from the `live` branch (updated every ~2 minutes); the copies on the site
 // (updated every ~13 minutes) are the fallback.
-import { createAssistant } from "./assistant.js?v=14";
+import { createAssistant } from "./assistant.js?v=15";
 
 const qs = new URLSearchParams(location.search);
 const DATA = qs.get("data") || "data";
@@ -872,7 +872,13 @@ VIEWS.home = () => {
     el("span", {}, el("b", {}, "Spot the ghost"), el("small", {}, "Which bus is more likely to let you down? A quick game with real Sheffield data.")), el("span", { class: "play-go", "aria-hidden": "true" }, "Play"));
   ctxLayer?.clearLayers(); drawVehicles(null);
   if (map && !current.fitted) { fit(V.v.map((v) => [v[0], v[1]]), 12.5); current.fitted = true; }
-  return [header, stats, quick, mine, shortcuts, section("Right now", seg, body), play, legendNote()];
+  if (!WK) get("weekly.json").then((w) => { if (w) { WK = w; if (parseHash().kind === "home") render(); } });
+  const feats = el("div", { class: "feats" },
+    el("a", { class: "feat replay", href: "#/replay" }, el("span", { class: "feat-ico", "aria-hidden": "true" }, "▶"),
+      el("span", {}, el("b", {}, "Replay a whole day"), el("small", {}, "Every bus in a minute, and every ghost drifting along the route it never drove."))),
+    el("a", { class: "feat report", href: "#/report" }, el("span", { class: "feat-ico", "aria-hidden": "true" }, WK?.rate ? oneIn(WK.rate).replace("1 in ", "1/") : "📊"),
+      el("span", {}, el("b", {}, "This week’s ghost report"), el("small", {}, WK?.rate ? `${oneIn(WK.rate)} buses never came, ${dm(WK.from)} to ${dm(WK.to)}. Worst routes, best routes, when it happens.` : "Worst routes, best routes and when buses go missing."))));
+  return [header, stats, quick, feats, mine, shortcuts, section("Right now", seg, body), play, legendNote()];
 };
 
 function legendNote() {
@@ -906,7 +912,8 @@ VIEWS.stop = (key, sub) => {
     el("p", { class: "muted" }, `${num(all.length)} buses timetabled here today · ${num(ran)} ran so far · `, el("span", { class: "g" }, `${num(gh)} never came`)),
     el("div", { class: "actions" }, favButton("stop", key, it.label), shareButton(), speakButton(() => spokenStop(it, up)),
       el("a", { class: "icon-btn", href: `#/plan/${encodeURIComponent(key)}` }, "Plan from here"),
-      el("a", { class: "icon-btn", href: `#/plan//${encodeURIComponent(key)}` }, "Plan to here"), placeButton(key, it.label)));
+      el("a", { class: "icon-btn", href: `#/plan//${encodeURIComponent(key)}` }, "Plan to here"), placeButton(key, it.label),
+      el("a", { class: "icon-btn", href: `#/board/${encodeURIComponent(key)}`, title: "A big live departure board for a TV or second screen" }, "Screen board")));
   const chips = routesHere.length > 1 ? el("div", { class: "chips filter" }, el("button", { type: "button", class: `chip${filter ? " quiet" : ""}`, onclick: () => { current.filter = null; render(); } }, "All routes"),
     routesHere.map((r) => el("button", { type: "button", class: `chip${filter === r ? "" : " quiet"}`, onclick: () => { current.filter = filter === r ? null : r; render(); } }, r))) : null;
   const seg = tabs([["next", `Next buses (${up.length})`], ["earlier", `Earlier today (${early.length})`], ["stats", "Stop stats"]], tab, (k) => { location.hash = `${href("stop", key)}/${k}`; });
@@ -1306,11 +1313,14 @@ async function routeHistory(key, box) {
   };
   const onlyMiss = el("label", { class: "check" }, el("input", { type: "checkbox", onchange: (e) => box.classList.toggle("only-miss", e.target.checked) }), " Only departures that have missed");
   const daily = r.daily || [];
+  const heatBox = el("div");
+  loadPatterns().then((p) => { const c = p?.routes?.[key]; if (c) heatBox.replaceChildren(section("By weekday and hour", el("p", { class: "muted small" }, "Darker means more of this route’s buses never came at that time."), heatmap(c, 6))); });
   box.replaceChildren(
     el("div", { class: "stats" }, stat(pct(judged ? ghosts / judged : 0), "never ran", "ghost"), stat(num(judged), "departures checked"), stat(num(ghosts), "ghost buses"), stat(num(unk), "not checked (no tracking)")),
     el("p", { class: "muted small" }, `95% range: ${rangeText(ghosts, judged)} · ${CONF_WORD[sureness(judged)].toLowerCase()} (${num(judged)} checked trips).`),
     daily.length > 1 ? section("Day by day", dayBars(daily, "Share that never ran, by day")) : null,
     section("When it happens", chart, el("div", { class: "hours-axis" }, ["00", "06", "12", "18", "23"].map((h) => el("span", {}, `${h}:00`)))),
+    heatBox,
     section("Every departure", onlyMiss, detail, el("p", { class: "muted small" }, "Tap a time for its record. The small figure is the model’s chance it runs next time, or days ran / days checked. Amber misses 1 in 10 or more, purple 3 in 10 or more.")),
     ...dirs.map((dir) => { const ds = deps.filter((d) => String(d.direction_id) === dir);
       return section(`Towards ${shortStop(mode(ds.map((d) => d.to_stop))) || "—"}`, el("div", { class: "grid" }, ds.map((d) => {
@@ -1499,6 +1509,307 @@ function modelBlock(m, mon) {
   return el("div", {}, parts);
 }
 
+// ---------------------------------------------------------------- replay: watch a whole day in a minute
+// replay.json holds one finished day: every bus's GPS every 2 minutes, and every ghost bus moving along the
+// route it was timetabled to drive. Both are drawn on a canvas over the map, so 500 buses stay smooth.
+let RP = null, rpCanvas = null;
+const rp = { t: 5.5 * 3600, playing: false, speed: 1200, raf: 0, last: 0, shown: -1 };
+const RP_START = 4.5 * 3600, RP_END = 24 * 3600;
+function undelta(flat) {
+  const n = flat.length / 3, a = new Int32Array(n), b = new Int32Array(n), c = new Int32Array(n);
+  let x = 0, y = 0, z = 0;
+  for (let k = 0; k < n; k++) { x += flat[3 * k]; y += flat[3 * k + 1]; z += flat[3 * k + 2]; a[k] = x; b[k] = y; c[k] = z; }
+  return [a, b, c];
+}
+async function loadReplay() {
+  if (RP) return RP;
+  const d = await get("replay.json");
+  if (!d) return null;
+  const toLL = (la, lo) => [d.lat0 + la / d.q, d.lon0 + lo / d.q];
+  RP = {
+    day: d.day, totals: d.totals, by_hour: d.by_hour || [], toLL,
+    buses: d.buses.map(([route, flat]) => { const [s, la, lo] = undelta(flat); return { route, t: Array.from(s, (x) => x * d.step), la, lo }; }),
+    ghosts: d.ghosts.map(([route, op, time, from, to, flat]) => { const [m, la, lo] = undelta(flat); return { route, op, time, from, to, t: Array.from(m, (x) => x * 60), la, lo }; })
+      .sort((a, b) => a.t[0] - b.t[0]),
+  };
+  return RP;
+}
+function posAt(o, t, maxGap) {             // linear position at time t, or null when the bus isn't on the road
+  const T = o.t;
+  if (t < T[0] || t > T[T.length - 1] + 240) return null;
+  let lo = 0, hi = T.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (T[mid] <= t) lo = mid; else hi = mid - 1; }
+  if (lo >= T.length - 1 || T[lo + 1] - T[lo] > maxGap) return t - T[lo] <= 240 ? [o.la[lo], o.lo[lo]] : null;
+  const f = (t - T[lo]) / (T[lo + 1] - T[lo]);
+  return [o.la[lo] + (o.la[lo + 1] - o.la[lo]) * f, o.lo[lo] + (o.lo[lo + 1] - o.lo[lo]) * f];
+}
+function ghostPath(ctx, x, y, s) {
+  ctx.beginPath();
+  ctx.moveTo(x - s, y + s);
+  ctx.lineTo(x - s, y - s * 0.1);
+  ctx.arc(x, y - s * 0.1, s, Math.PI, 0);
+  ctx.lineTo(x + s, y + s);
+  for (let k = 0; k < 3; k++) { const x1 = x + s - (k * 2 + 1) * (s / 3); ctx.lineTo(x1, y + s * 0.6); ctx.lineTo(x1 - s / 3, y + s); }
+  ctx.closePath();
+}
+function drawReplay() {
+  if (!rpCanvas || !RP || !map) return;
+  const size = map.getSize(), dpr = devicePixelRatio || 1;
+  if (rpCanvas.width !== size.x * dpr || rpCanvas.height !== size.y * dpr) {
+    rpCanvas.width = size.x * dpr; rpCanvas.height = size.y * dpr; rpCanvas.style.width = `${size.x}px`; rpCanvas.style.height = `${size.y}px`;
+  }
+  const ctx = rpCanvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, size.x, size.y);
+  const t = rp.t, z = map.getZoom(), pt = (la, lo) => map.latLngToContainerPoint(RP.toLL(la, lo));
+  const r = z >= 15 ? 5 : z >= 13 ? 3.6 : 2.6;
+  let on = 0;
+  // buses: a short trail, then the dot
+  ctx.lineCap = "round";
+  for (const b of RP.buses) {
+    const p = posAt(b, t, 600);
+    if (!p) continue;
+    on++;
+    const q = pt(p[0], p[1]), back = posAt(b, t - 150, 600);
+    if (back) { const k = pt(back[0], back[1]); ctx.strokeStyle = "rgba(255,196,61,.35)"; ctx.lineWidth = r * 1.2; ctx.beginPath(); ctx.moveTo(k.x, k.y); ctx.lineTo(q.x, q.y); ctx.stroke(); }
+    ctx.fillStyle = "#ffc43d"; ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, 7); ctx.fill();
+    if (z >= 15 && b.route) { ctx.fillStyle = darkMap ? "#fff" : "#1b1530"; ctx.font = "700 11px system-ui"; ctx.fillText(b.route, q.x + r + 2, q.y + 4); }
+  }
+  // ghosts: drift along the route they should have driven, fading out 15 minutes after the end
+  let started = 0;
+  for (const g of RP.ghosts) {
+    if (g.t[0] > t) break;
+    started++;
+    const end = g.t[g.t.length - 1];
+    if (t > end + 900) continue;
+    const p = t <= end ? posAt(g, t, 3600) : [g.la[g.la.length - 1], g.lo[g.lo.length - 1]];
+    if (!p) continue;
+    const q = pt(p[0], p[1]), a = t <= end ? 1 : 1 - (t - end) / 900, s = z >= 14 ? 11 : 8;
+    const age = t - g.t[0];
+    if (age < 240) {             // a ring where it went missing
+      ctx.strokeStyle = `rgba(255,79,163,${1 - age / 240})`; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(q.x, q.y, s + age / 8, 0, 7); ctx.stroke();
+    }
+    ctx.save(); ctx.globalAlpha = a * 0.92; ctx.shadowColor = "#ff4fa3"; ctx.shadowBlur = 12;
+    ghostPath(ctx, q.x, q.y - s * 0.2, s); ctx.fillStyle = "#f6f1ff"; ctx.fill();
+    ctx.shadowBlur = 0; ctx.fillStyle = "#2a1650";
+    ctx.beginPath(); ctx.arc(q.x - s * 0.38, q.y - s * 0.35, s * 0.16, 0, 7); ctx.arc(q.x + s * 0.38, q.y - s * 0.35, s * 0.16, 0, 7); ctx.fill();
+    if (z >= 13) { ctx.fillStyle = "#ff4fa3"; ctx.font = `700 ${z >= 14 ? 12 : 10}px system-ui`; ctx.textAlign = "center"; ctx.fillText(g.route, q.x, q.y - s * 1.45); ctx.textAlign = "left"; }
+    ctx.restore();
+  }
+  rpUpdateHud(on, started);
+}
+function rpClock(t) { return hhmm(Math.round(t)); }
+function rpUpdateHud(on, started) {
+  const set = (id, v) => { const n = document.getElementById(id); if (n && n.textContent !== v) n.textContent = v; };
+  set("rp-clock", rpClock(rp.t)); set("rp-on", num(on)); set("rp-gone", num(started));
+  const range = document.getElementById("rp-range");
+  if (range && document.activeElement !== range) range.value = String(Math.round(rp.t));
+  const play = document.getElementById("rp-play");
+  if (play) { const want = rp.playing ? "❚❚ Pause" : rp.t >= RP_END - 1 ? "↺ Replay" : "▶ Play"; if (play.textContent !== want) play.textContent = want; }
+  const h = Math.floor(rp.t / 3600);
+  document.querySelectorAll("#rp-hours i").forEach((b) => b.classList.toggle("now", +b.dataset.h === h));
+  if (started !== rp.shown) {
+    rp.shown = started;
+    const box = document.getElementById("rp-feed");
+    if (box) box.replaceChildren(...RP.ghosts.slice(Math.max(0, started - 5), started).reverse().map((g) =>
+      el("li", {}, el("span", { class: "rt" }, g.route), el("span", {}, el("b", {}, `${g.time} never came`), el("small", {}, `${shortStop(g.from)} to ${shortStop(g.to)} · ${g.op}`)))));
+    if (box && !started) box.replaceChildren(el("li", { class: "muted" }, "No ghost buses yet. Press play."));
+  }
+}
+function rpLoop(ts) {
+  const dt = rp.last ? Math.min(0.1, (ts - rp.last) / 1000) : 0;
+  rp.last = ts;
+  if (rp.playing) { rp.t = Math.min(RP_END, rp.t + dt * rp.speed); if (rp.t >= RP_END) rp.playing = false; }
+  drawReplay();
+  rp.raf = requestAnimationFrame(rpLoop);
+}
+function startReplay() {
+  if (!map || rpCanvas) return;
+  rpCanvas = el("canvas", { class: "rp-canvas", "aria-hidden": "true" });
+  map.getContainer().append(rpCanvas);
+  vehLayer.clearLayers(); ctxLayer.clearLayers(); selLayer.clearLayers();
+  $("#map").classList.add("replaying");
+  map.on("move zoom resize", drawReplay);
+  rp.last = 0; rp.raf = requestAnimationFrame(rpLoop);
+}
+function stopReplay() {
+  if (!rpCanvas) return;
+  cancelAnimationFrame(rp.raf); rp.playing = false;
+  map.off("move zoom resize", drawReplay);
+  rpCanvas.remove(); rpCanvas = null;
+  $("#map").classList.remove("replaying");
+}
+VIEWS.replay = () => {
+  const box = el("div", {}, el("p", { class: "muted" }, "Loading a whole day of buses…"));
+  loadReplay().then((d) => {
+    if (!d) { box.replaceChildren(el("p", { class: "muted" }, "The replay isn’t ready yet. It’s built each morning from the day before.")); return; }
+    if (!map) { box.replaceChildren(el("p", { class: "muted" }, "The replay needs the map, which couldn’t load.")); return; }
+    if (parseHash().kind !== "replay") return;
+    const first = !rpCanvas;
+    startReplay();
+    if (first) { fit([[53.33, -1.56], [53.44, -1.36]], 12.5); if (!reduced && rp.t <= 5.5 * 3600 + 1) rp.playing = true; }
+    const day = new Date(`${d.day}T12:00:00`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+    const speeds = [[300, "Slow"], [1200, "Normal"], [3600, "Fast"]];
+    const maxG = Math.max(1, ...d.by_hour.map((x) => x[2]));
+    box.replaceChildren(
+      el("div", { class: "rp-top" },
+        el("div", { class: "rp-clock" }, el("b", { id: "rp-clock" }, rpClock(rp.t)), el("small", {}, day)),
+        el("div", { class: "rp-count" }, el("span", {}, el("b", { id: "rp-on" }, "0"), el("small", {}, "buses on the road")),
+          el("span", { class: "g" }, el("b", { id: "rp-gone" }, "0"), el("small", {}, "never came")))),
+      el("div", { class: "rp-controls" },
+        el("button", { type: "button", class: "chip", id: "rp-play", onclick: () => { if (rp.t >= RP_END - 1) rp.t = RP_START; rp.playing = !rp.playing; drawReplay(); } }, "▶ Play"),
+        el("div", { class: "seg small", role: "group", "aria-label": "Speed" }, speeds.map(([v, w]) =>
+          el("button", { type: "button", class: rp.speed === v ? "on" : "", "aria-pressed": String(rp.speed === v), onclick: (e) => { rp.speed = v; e.target.parentElement.querySelectorAll("button").forEach((b) => { b.classList.toggle("on", b === e.target); b.setAttribute("aria-pressed", String(b === e.target)); }); } }, w)))),
+      el("input", { type: "range", id: "rp-range", class: "rp-range", min: RP_START, max: RP_END, step: 60, value: Math.round(rp.t), "aria-label": "Time of day",
+        oninput: (e) => { rp.t = +e.target.value; drawReplay(); } }),
+      el("div", { class: "rp-hours", id: "rp-hours", role: "img", "aria-label": "Ghost buses by hour" },
+        Array.from({ length: 24 }, (_, h) => { const g = (d.by_hour.find((x) => x[0] === h) || [h, 0, 0])[2]; const b = el("i", { "data-h": h, title: `${String(h).padStart(2, "0")}:00 · ${g} never came` }); b.style.height = `${8 + (g / maxG) * 92}%`; return b; })),
+      el("div", { class: "hours-axis" }, ["00", "06", "12", "18", "23"].map((h) => el("span", {}, `${h}:00`))),
+      section("Just went missing", el("ul", { class: "rp-feed", id: "rp-feed" })),
+      el("p", { class: "muted small" }, `Yellow dots are the ${num(d.totals.vehicles)} buses that sent their GPS that day, with a short trail behind them. `,
+        `Each ghost is one of the ${num(d.totals.ghosts)} timetabled buses that never turned up (of ${num(d.totals.judged)} checked), moving along the route it should have driven, at the times it should have driven it.`),
+      el("div", { class: "chips" }, el("a", { class: "chip quiet", href: "#/report" }, "This week’s ghost report"), el("a", { class: "chip quiet", href: "#/reliability" }, "Every route’s record")));
+    rp.shown = -1; drawReplay();
+  });
+  return [el("div", { class: "head" }, el("p", { class: "kicker" }, "Replay"), el("h2", {}, "A whole day of Sheffield’s buses in a minute"),
+    el("p", { class: "muted" }, "Every bus that drove, and every bus that never came. Drag the slider to any time.")), box];
+};
+
+// ---------------------------------------------------------------- when do buses go missing? weekday × hour
+const WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+function heatmap(cells, minN = 25) {
+  const m = new Map(cells.map(([wd, h, n, g]) => [`${wd}-${h}`, [n, g]]));
+  const hours = cells.map((c) => c[1]), h0 = Math.min(...hours, 5), h1 = Math.max(...hours, 23);
+  const cols = h1 - h0 + 1;
+  const grid = el("div", { class: "heat", style: `grid-template-columns: 2.6em repeat(${cols}, 1fr)`, role: "table", "aria-label": "Share of buses that never came, by weekday and hour" });
+  grid.append(el("span", {}));
+  for (let h = h0; h <= h1; h++) grid.append(el("span", { class: "hx" }, h % 3 === 0 ? String(h).padStart(2, "0") : ""));
+  for (let wd = 0; wd < 7; wd++) {
+    grid.append(el("span", { class: "hy" }, WD[wd]));
+    for (let h = h0; h <= h1; h++) {
+      const [n, g] = m.get(`${wd}-${h}`) || [0, 0], r = n ? g / n : 0;
+      const tip = `${WD[wd]} ${String(h).padStart(2, "0")}:00 · ${n < minN ? `only ${n} checked` : `${pct(r)} never came (${g} of ${num(n)})`}`;
+      const c = el("i", { title: tip, "aria-label": tip, class: n < minN ? "few" : r >= 0.15 ? "hot" : "" });
+      if (n >= minN) c.style.setProperty("--a", Math.min(1, 0.08 + r / 0.15).toFixed(2));
+      grid.append(c);
+    }
+  }
+  return el("div", {}, grid, el("div", { class: "heat-key" }, el("span", {}, "All ran"), el("i", { class: "k" }), el("span", {}, "15%+ never came"), el("i", { class: "few" }), el("span", {}, "Too few to say")));
+}
+let PAT = null;
+const loadPatterns = async () => (PAT ??= await get("patterns.json"));
+
+// ---------------------------------------------------------------- the weekly ghost report
+let WK = null;
+const dm = (d) => new Date(`${d}T12:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+const oneIn = (r) => (r ? `1 in ${Math.max(1, Math.round(1 / r))}` : "none");
+function change(now, prev) {
+  if (now == null || prev == null) return el("small", { class: "muted" }, "new this week");
+  const d = (now - prev) * 100;
+  if (Math.abs(d) < 0.3) return el("small", { class: "muted" }, "about the same");
+  return el("small", { class: d > 0 ? "worse" : "better" }, `${d > 0 ? "▲" : "▼"} ${Math.abs(d).toFixed(1)} pts`);
+}
+function routeLine(r) {
+  return el("a", { class: "wk-row", href: href("route", r.id) + "/history" }, el("span", { class: "rt" }, r.route),
+    el("span", { class: "wk-name" }, el("b", {}, r.operator), el("small", {}, `${num(r.ghosts)} of ${num(r.judged)} never came`)),
+    el("span", { class: "wk-bar" }, el("i", { style: `width:${Math.min(100, (r.rate / 0.3) * 100).toFixed(1)}%` })),
+    el("span", { class: "wk-rate" }, el("b", {}, pct(r.rate)), change(r.rate, r.prev_rate)));
+}
+async function shareCard(w) {
+  const c = document.createElement("canvas"); c.width = 1200; c.height = 630;
+  const x = c.getContext("2d");
+  await document.fonts?.ready;
+  const F = (s, wgt = 700) => `${wgt} ${s}px "Atkinson Hyperlegible", system-ui, sans-serif`;
+  x.fillStyle = "#0E1726"; x.fillRect(0, 0, 1200, 630);
+  x.fillStyle = "#A48BFF"; x.font = F(30); x.fillText("GHOST BUS · SHEFFIELD", 70, 92);
+  x.fillStyle = "#c9c3e6"; x.font = F(28, 400); x.fillText(`Weekly report, ${dm(w.from)} to ${dm(w.to)}`, 70, 140);
+  x.fillStyle = "#fff"; x.font = F(150); x.fillText(oneIn(w.rate), 64, 320);
+  x.font = F(40, 400); x.fillText("timetabled buses never turned up", 70, 384);
+  x.fillStyle = "#c9c3e6"; x.font = F(28, 400);
+  x.fillText(`${w.ghosts.toLocaleString("en-GB")} ghost buses out of ${w.judged.toLocaleString("en-GB")} checked against live GPS`, 70, 436);
+  if (w.prev?.rate != null) { const up = w.rate > w.prev.rate; x.fillStyle = up ? "#ff7a9a" : "#5ee0a9"; x.fillText(`${up ? "Up" : "Down"} from ${oneIn(w.prev.rate)} the week before`, 70, 478); }
+  const wr = w.worst[0];
+  if (wr) { x.fillStyle = "#1c2840"; x.fillRect(70, 512, 1060, 70); x.fillStyle = "#ffc43d"; x.font = F(30); x.fillText(`Worst route: ${wr.route} (${wr.operator}), ${pct(wr.rate, 0)} never came`, 96, 558); }
+  x.fillStyle = "#6f7894"; x.font = F(22, 400); x.fillText("mohammed-890.github.io/ghost-bus", 830, 92);
+  // a small ghost
+  ghostPath(x, 1080, 230, 56); x.fillStyle = "#f6f1ff"; x.shadowColor = "#ff4fa3"; x.shadowBlur = 30; x.fill(); x.shadowBlur = 0;
+  x.fillStyle = "#2a1650"; x.beginPath(); x.arc(1058, 210, 9, 0, 7); x.arc(1102, 210, 9, 0, 7); x.fill();
+  return new Promise((ok) => c.toBlob(ok, "image/png"));
+}
+VIEWS.report = () => {
+  const box = el("div", {}, el("p", { class: "muted" }, "Loading the report…"));
+  Promise.all([WK ? WK : get("weekly.json"), loadPatterns()]).then(([w, pat]) => {
+    WK = w;
+    if (!w || !w.judged) { box.replaceChildren(el("p", { class: "muted" }, "The first weekly report needs a few more days of data.")); return; }
+    const up = w.prev?.rate != null && w.rate > w.prev.rate;
+    const lead = el("p", { class: "wk-lead" }, el("b", {}, `${oneIn(w.rate)} timetabled buses never turned up`),
+      ` between ${dm(w.from)} and ${dm(w.to)}: ${num(w.ghosts)} ghost buses out of ${num(w.judged)} checked against live GPS`,
+      w.prev?.rate != null ? `, ${up ? "up" : "down"} from ${oneIn(w.prev.rate)} the week before.` : ".");
+    const maxD = 1.15 * Math.max(0.01, ...w.by_day.map(([, n, g]) => (n ? g / n : 0)));
+    const days = el("div", { class: "wk-days" }, w.by_day.map(([d, n, g]) => el("div", { title: `${dm(d)}: ${g} of ${num(n)} never came` },
+      el("i", { style: `height:${((n ? g / n : 0) / maxD) * 100}%` }), el("small", {}, new Date(`${d}T12:00:00`).toLocaleDateString("en-GB", { weekday: "short" })), el("b", {}, pct(n ? g / n : 0, 0)))));
+    const gw = w.ghost_of_the_week;
+    const gotw = gw ? el("a", { class: "gotw", href: href("route", gw.id) + "/history" }, el("span", { class: "gotw-ico", "aria-hidden": "true" }, "👻"),
+      el("span", {}, el("small", {}, "Ghost of the week"), el("b", {}, `The ${gw.time} route ${gw.route} from ${shortStop(gw.from)}`),
+        el("small", {}, `${gw.operator}. Never came on ${gw.ghost_days} of the ${gw.judged_days} days we could check.`))) : null;
+    const sh = el("button", { type: "button", class: "chip", onclick: async (e) => {
+      const b = e.currentTarget; b.textContent = "Making the image…";
+      const blob = await shareCard(w), file = new File([blob], `ghost-bus-report-${w.to}.png`, { type: "image/png" });
+      if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file], title: "Ghost Bus weekly report", text: `${oneIn(w.rate)} Sheffield buses never came this week.` }); } catch {} }
+      else { const a = el("a", { href: URL.createObjectURL(blob), download: file.name }); document.body.append(a); a.click(); a.remove(); }
+      b.textContent = "Share this report as an image";
+    } }, "Share this report as an image");
+    const opRows = w.operators.map((o) => el("tr", {}, el("td", {}, o.operator), el("td", { class: "n" }, num(o.judged)), el("td", { class: "n" }, pct(o.rate)), el("td", { class: "n" }, change(o.rate, o.prev_rate))));
+    box.replaceChildren(
+      lead,
+      el("div", { class: "stats" }, stat(oneIn(w.rate), "never came", "ghost"), stat(num(w.ghosts), "ghost buses"), stat(num(w.judged), "buses checked"),
+        w.worst_hour ? stat(`${String(w.worst_hour.hour).padStart(2, "0")}:00`, `worst hour (${pct(w.worst_hour.rate, 0)} missing)`) : null),
+      el("div", { class: "chips" }, sh, el("a", { class: "chip quiet", href: "#/replay" }, "▶ Watch a whole day replayed")),
+      section("Day by day", days),
+      gotw,
+      section("Worst routes this week", el("div", { class: "wk-list" }, w.worst.map(routeLine)), el("p", { class: "muted small" }, "Routes with at least 80 checked departures this week. ▲ ▼ compare with the week before.")),
+      w.improved.length ? section("Most improved", el("div", { class: "wk-list" }, w.improved.map(routeLine))) : null,
+      w.worsened.length ? section("Getting worse", el("div", { class: "wk-list" }, w.worsened.map(routeLine))) : null,
+      w.best.length ? section("Most reliable", el("div", { class: "wk-list" }, w.best.map(routeLine))) : null,
+      pat?.city ? section("When buses go missing", el("p", { class: "muted small" }, `Every day checked so far (${dm(pat.from)} to ${dm(pat.to)}). Darker means more buses never came at that hour.`), heatmap(pat.city, 40)) : null,
+      w.operators.length ? section("Operators", el("table", { class: "tbl" }, el("thead", {}, el("tr", {}, el("th", {}, "Operator"), el("th", { class: "n" }, "Checked"), el("th", { class: "n" }, "Never came"), el("th", { class: "n" }, "vs last week"))), el("tbody", {}, opRows))) : null,
+      el("p", { class: "muted small" }, "A bus only counts as a ghost when the live feed and its operator were reporting properly at the time. Buses we couldn’t check are left out, not counted against anyone."));
+  });
+  ctxLayer?.clearLayers(); drawVehicles(null);
+  return [el("div", { class: "head" }, el("p", { class: "kicker" }, "Weekly report"), el("h2", {}, "Sheffield’s ghost bus report")), box];
+};
+
+// ---------------------------------------------------------------- departure board for a screen
+let tvTimer = null;
+VIEWS.board = (key) => {
+  const it = findItem("stop", key);
+  if (!it) return [el("h2", {}, "Board"), el("p", {}, "That stop isn’t in today’s timetable.")];
+  const now = nowSecs(), want = new Set(it.stops), all = [];
+  B.trips.forEach((t, i) => { const s = t[6]; for (let k = 0; k < s.length - 2; k += 2) if (want.has(s[k])) { all.push({ i, secs: t[2] + s[k + 1] * 60, k: k / 2 }); break; } });
+  const up = all.map((d) => ({ ...d, ex: expected(d.i, d.k, d.secs) })).filter((d) => !d.ex.passed && d.ex.secs >= now - 60 && st(d.i) !== "G" && st(d.i) !== "R")
+    .sort((a, b) => a.ex.secs - b.ex.secs).slice(0, 9);
+  const gone = all.filter((d) => st(d.i) === "G").length;
+  const rows = up.map((d) => {
+    const L0 = live(d.i), rk = riskOf(d.i), m = Math.round((d.ex.secs - now) / 60);
+    const status = L0 ? (L0.delay > 1 ? [`${L0.delay} min late`, "late"] : L0.delay < -1 ? [`${-L0.delay} min early`, "early"] : ["On time", "ok"])
+      : rk?.level === "high" ? ["May not come", "risk"] : ["Timetable", "tt"];
+    return el("tr", {}, el("td", {}, el("span", { class: "tv-rt" }, routeOf(d.i)[0])), el("td", { class: "tv-to" }, headsign(d.i), el("small", {}, routeOf(d.i)[1])),
+      el("td", {}, el("span", { class: `tv-st ${status[1]}` }, L0 ? "● " : "", status[0])),
+      el("td", { class: "tv-due" }, m <= 0 ? "Due" : m < 60 ? `${m} min` : hhmm(d.ex.secs)));
+  });
+  let tv = $("#tv");
+  if (!tv) { tv = el("div", { id: "tv", class: "tv" }); document.body.append(tv); }
+  tv.replaceChildren(
+    el("header", {}, el("div", {}, el("small", {}, "Departures"), el("h1", {}, it.label)), el("b", { id: "tv-clock" }, new Date().toLocaleTimeString("en-GB", { timeZone: "Europe/London" }))),
+    rows.length ? el("table", {}, el("tbody", {}, rows)) : el("p", { class: "tv-none" }, "No more buses from here today."),
+    el("footer", {}, el("span", {}, "● = live GPS. Times move with the bus."), gone ? el("span", { class: "g" }, `${gone} bus${gone === 1 ? "" : "es"} never came here today`) : el("span", {}, "Every bus has turned up here today"),
+      el("a", { href: href("stop", key) }, "Exit board ✕")));
+  clearInterval(tvTimer);
+  tvTimer = setInterval(() => { const c = $("#tv-clock"); if (c) c.textContent = new Date().toLocaleTimeString("en-GB", { timeZone: "Europe/London" }); else clearInterval(tvTimer); }, 1000);
+  return [el("h2", { class: "vh" }, `${it.label} board`)];
+};
+
 // ---------------------------------------------------------------- router
 function parseHash() {
   const [, kind = "home", key = "", sub = "", extra = ""] = (location.hash.replace(/^#\/?/, "#/").match(/^#\/([^/]*)\/?([^/]*)\/?([^/]*)\/?([^/]*)/) || []);
@@ -1510,6 +1821,9 @@ function render(reset) {
   const same = h.kind === current.kind && h.key === current.key && h.sub === current.sub && h.extra === current.extra;
   if (!same && map && mapCard && map.hasLayer(mapCard)) map.closePopup(mapCard);
   if (!same && sheet?.classList.contains("open")) closeSheet();
+  if (h.kind !== "replay") stopReplay();
+  document.body.classList.toggle("tv-on", h.kind === "board");
+  if (h.kind !== "board") { $("#tv")?.remove(); clearInterval(tvTimer); }
   if (!same) current = { ...h, fitted: false, filter: h.kind === current.kind && h.key === current.key ? current.filter : null };
   const fn = VIEWS[h.kind] || VIEWS.home;
   const panel = $("#view"), top = panel.scrollTop;

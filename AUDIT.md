@@ -131,6 +131,15 @@ Ranked by passenger value, then feasibility, competitive edge, cost and commerci
 7. **Notifications** go through the service worker (better on phones). It has `push` and `notificationclick` handlers ready, and the API has `/push/subscribe`.
 8. **Data pipeline.** Daily series per route and operator, not-checked counts, and last-7-day counts are published by `publish.build()`.
 
+## 8. Built in round three
+
+1. **Replay a whole day** (`#/replay`). Every bus that sent its GPS that day, every 2 minutes, plus every ghost bus moving along the route it was timetabled to drive, at the times it should have driven it. It plays a day in about a minute, with a time slider, three speeds, a running count and a feed of buses as they go missing. It's drawn on one canvas over the map so 500 buses stay smooth on a phone. Data: `replay.json` (about 330 KB compressed), built each morning by `ghostbus/insights.py` from the raw pings and the day's stop times.
+2. **Weekly ghost report** (`#/report`). This week against last week, day by day, the worst routes, the most improved, the ones getting worse, the most reliable, every operator, the worst hour and the "ghost of the week" (the departure that failed most often). One button turns it into a 1200×630 image to share. Data: `weekly.json`.
+3. **When buses go missing.** A weekday × hour heatmap for the whole city (on the report) and for every busy route (on its History tab). Cells with too few checked trips are hatched, never coloured. Data: `patterns.json`.
+4. **Departure board for a screen** (`#/board/<stop>`). A full-screen live board for a TV in a café, a library or a student union: next buses, live GPS or timetable, "may not come" warnings and how many buses never came there today. Every stop page links to it.
+
+Checked: 41 Python tests pass (3 new for the builders). The 147-question assistant regression gives the same intents. The browser QA suite passes with no console errors, and the new views were checked at desktop and phone widths.
+
 ### Still needs hosting or external access
 
 | Feature | What's missing |
