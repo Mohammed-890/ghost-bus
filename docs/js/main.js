@@ -7,7 +7,7 @@
 //   summary.json, routes.json, routes/<id>.json, recent_ghosts.json, shapes.json, model.json, monitoring.json
 // The two live files come from the `live` branch (updated every ~2 minutes); the copies on the site
 // (updated every ~13 minutes) are the fallback.
-import { createAssistant } from "./assistant.js?v=16";
+import { createAssistant } from "./assistant.js?v=17";
 
 const qs = new URLSearchParams(location.search);
 const DATA = qs.get("data") || "data";
@@ -24,6 +24,7 @@ const el = (tag, attrs = {}, ...kids) => {
   for (const k of kids.flat()) if (k != null && k !== false) n.append(k.nodeType ? k : document.createTextNode(k));
   return n;
 };
+const fill = (node, ...kids) => node.replaceChildren(...kids.flat().filter((k) => k != null && k !== false));   // replaceChildren would print "null"
 const get = (p) => fetch(`${DATA}/${p}`, { cache: "no-cache" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
 // GitHub's raw file server caches a branch for 5 minutes, whatever the query string. So ask which commit
 // is the latest on the live branch (a conditional request, which doesn't use up the API's hourly allowance
@@ -880,6 +881,10 @@ VIEWS.home = () => {
       el("span", {}, el("b", {}, "Replay a whole day"), el("small", {}, "Every bus in a minute, and every ghost drifting along the route it never drove."))),
     el("a", { class: "feat hot", href: "#/hotspots" }, el("span", { class: "feat-ico", "aria-hidden": "true" }, "◉"),
       el("span", {}, el("b", {}, "Where buses vanish"), el("small", {}, "Every stop on the map, by how many buses due there never came."))),
+    el("a", { class: "feat fc", href: "#/forecast" }, el("span", { class: "feat-ico", "aria-hidden": "true" }, "⛅"),
+      el("span", {}, el("b", {}, "Ghost forecast"), el("small", {}, "Which buses the model expects not to run today, like a weather forecast."))),
+    el("a", { class: "feat stories", href: "#/story" }, el("span", { class: "feat-ico", "aria-hidden": "true" }, "✦"),
+      el("span", {}, el("b", {}, "Sheffield’s ghost buses in 60 seconds"), el("small", {}, "The numbers, one screen at a time. Made to share."))),
     el("a", { class: "feat report", href: "#/report" }, el("span", { class: "feat-ico", "aria-hidden": "true" }, WK?.rate ? oneIn(WK.rate).replace("1 in ", "1/") : "📊"),
       el("span", {}, el("b", {}, "This week’s ghost report"), el("small", {}, WK?.rate ? `${oneIn(WK.rate)} buses never came, ${dm(WK.from)} to ${dm(WK.to)}. Worst routes, best routes, when it happens.` : "Worst routes, best routes and when buses go missing."))));
   return [header, stats, quick, feats, mine, shortcuts, section("Right now", seg, body), play, legendNote()];
@@ -917,7 +922,7 @@ VIEWS.stop = (key, sub) => {
     el("div", { class: "actions" }, favButton("stop", key, it.label), shareButton(), speakButton(() => spokenStop(it, up)),
       el("a", { class: "icon-btn", href: `#/plan/${encodeURIComponent(key)}` }, "Plan from here"),
       el("a", { class: "icon-btn", href: `#/plan//${encodeURIComponent(key)}` }, "Plan to here"), placeButton(key, it.label),
-      el("a", { class: "icon-btn", href: `#/board/${encodeURIComponent(key)}`, title: "A big live departure board for a TV or second screen" }, "Screen board")));
+      el("a", { class: "icon-btn", href: `#/board/${encodeURIComponent(key)}`, title: "A big live departure board for a TV or second screen" }, "Screen board"), embedButton(key, it.label)));
   const chips = routesHere.length > 1 ? el("div", { class: "chips filter" }, el("button", { type: "button", class: `chip${filter ? " quiet" : ""}`, onclick: () => { current.filter = null; render(); } }, "All routes"),
     routesHere.map((r) => el("button", { type: "button", class: `chip${filter === r ? "" : " quiet"}`, onclick: () => { current.filter = filter === r ? null : r; render(); } }, r))) : null;
   const seg = tabs([["next", `Next buses (${up.length})`], ["earlier", `Earlier today (${early.length})`], ["stats", "Stop stats"]], tab, (k) => { location.hash = `${href("stop", key)}/${k}`; });
@@ -1251,7 +1256,7 @@ async function reliabilityInto(box, tab) {
     so.value = relState.sort;
     const only = el("label", { class: "check" }, el("input", { type: "checkbox", checked: relState.only, onchange: (e) => { relState.only = e.target.checked; draw(); } }), " Only routes missing 5%+");
     draw();
-    box.replaceChildren(period, el("div", { class: "filters" }, q, op, mn, so, only), out);
+    fill(box, period, el("div", { class: "filters" }, q, op, mn, so, only), out);
     drawGhostMap(shapes);
     return;
   }
@@ -1259,7 +1264,7 @@ async function reliabilityInto(box, tab) {
   if (tab === "operators") {
     const list = (ops || []).map((o) => ({ o, n: nOf(o), g: gOf(o) })).filter((x) => x.n >= 20).sort((a, b) => b.g / b.n - a.g / a.n);
     const mx = Math.max(0.02, ...list.map((x) => x.g / x.n));
-    box.replaceChildren(period, el("p", { class: "muted small" }, "Operators with 20+ checked trips. The line shows each day’s share that never ran. Tap one to see its routes."),
+    fill(box, period, el("p", { class: "muted small" }, "Operators with 20+ checked trips. The line shows each day’s share that never ran. Tap one to see its routes."),
       el("div", { class: "reltable" }, list.map(({ o, n, g }) => {
         const sure = sureness(n);
         return el("a", { class: "relrow op", href: "#/reliability/routes", onclick: () => { relState.op = o.operator; relState.q = ""; } },
@@ -1272,14 +1277,14 @@ async function reliabilityInto(box, tab) {
   }
   if (tab === "days") {
     const d = (daily || []).map((x) => [x.service_date, x.judged, x.ghosts, x.unknown ?? Math.max(0, x.scheduled - x.judged)]);
-    box.replaceChildren(el("p", { class: "muted small" }, "Each bar is a day: the share of checked trips that never ran. Hover or tap for the numbers."), dayBars(d, "Share of buses that never ran, by day"),
+    fill(box, el("p", { class: "muted small" }, "Each bar is a day: the share of checked trips that never ran. Hover or tap for the numbers."), dayBars(d, "Share of buses that never ran, by day"),
       el("table", { class: "daytable" }, el("thead", {}, el("tr", {}, ["Day", "Timetabled", "Checked", "Never ran", "Not checked"].map((h) => el("th", {}, h)))),
         el("tbody", {}, [...d].reverse().map(([day, n, g, u]) => el("tr", {}, el("td", {}, dayName(day)), el("td", {}, num(n + u)), el("td", {}, num(n)), el("td", {}, `${num(g)} (${pct(n ? g / n : 0)})`), el("td", {}, num(u)))))),
       section("Recent ghost buses", el("div", { class: "plain" }, (recent || []).slice(0, 15).map((r) => el("p", {}, el("span", { class: "muted" }, `${dayName(r.date)} ${r.time} `), el("b", {}, r.route), ` ${r.operator} · ${r.from || ""} → ${r.to || ""}`)))));
     return;
   }
   const a = liveAccuracy(), k = a.check;
-  box.replaceChildren(
+  fill(box, 
     section("Matching buses to trips", k?.n ? el("p", {}, `Right now, ${num(k.n)} buses are sending their trip. We hide that, work the trip out from the bus’s movements alone, and compare: `, el("b", {}, `${pct(k.right / k.n, 0)} right`), `, ${pct(k.wrong / k.n, 0)} wrong, the rest left unmatched. That’s why a bus matched this way gets “medium” confidence, not “high”.`) : el("p", { class: "muted" }, "No self-check in this update.")),
     section("Delay estimates for buses not tracked yet", a.n ? el("p", {}, `We estimate a bus’s delay from the other buses on its route and direction. Tested right now on ${num(a.n)} tracked buses (leaving each one out and estimating it from the rest): off by `, el("b", {}, `${a.est.toFixed(1)} min`), ` on average, against ${a.zero.toFixed(1)} min for just assuming “on time”. ${a.est < a.zero ? "So the estimate is worth showing." : "Right now it isn’t better than assuming on time."}`) : el("p", { class: "muted" }, "Not enough buses on the road to test this now.")),
     section("Will this bus run? (the model)", el("p", {}, "Each morning a model predicts the chance every departure runs. It only goes live if it beats simpler rules on days it has never seen. Its scores are on ", el("a", { href: "#/about" }, "How it works"), ".")),
@@ -1300,7 +1305,7 @@ function drawGhostMap(shapes) {
 
 async function routeHistory(key, box) {
   const r = await get(`routes/${key}.json`);
-  if (!r) { box.replaceChildren(el("p", { class: "muted" }, "No history for this route yet.")); return; }
+  if (!r) { fill(box, el("p", { class: "muted" }, "No history for this route yet.")); return; }
   const deps = r.departures, judged = deps.reduce((a, d) => a + d.days, 0), ghosts = deps.reduce((a, d) => a + d.ghosts, 0), unk = deps.reduce((a, d) => a + (d.unknown || 0), 0);
   const hours = new Map(r.by_hour.map(([h, n, g]) => [h, [n, g]])), max = Math.max(0.05, ...[...hours.values()].map(([n, g]) => (n ? g / n : 0)));
   const chart = el("div", { class: "hours", role: "img", "aria-label": "Share of departures that never ran, by hour" },
@@ -1319,7 +1324,7 @@ async function routeHistory(key, box) {
   const daily = r.daily || [];
   const heatBox = el("div");
   loadPatterns().then((p) => { const c = p?.routes?.[key]; if (c) heatBox.replaceChildren(section("By weekday and hour", el("p", { class: "muted small" }, "Darker means more of this route’s buses never came at that time."), heatmap(c, 6))); });
-  box.replaceChildren(
+  fill(box, 
     el("div", { class: "stats" }, stat(pct(judged ? ghosts / judged : 0), "never ran", "ghost"), stat(num(judged), "departures checked"), stat(num(ghosts), "ghost buses"), stat(num(unk), "not checked (no tracking)")),
     judged >= 30 ? el("div", { class: "actions" }, shareImageButton(() => cardImage({ kicker: `Route ${r.route}, ${r.operator}`, big: oneIn(ghosts / judged), line: "of this route’s buses never turned up",
       sub: `${num(ghosts)} ghost buses out of ${num(judged)} checked against live GPS`, highlight: daily.length ? `Checked every day from ${dm(daily[0][0])} to ${dm(daily.at(-1)[0])}` : null }),
@@ -1483,7 +1488,7 @@ VIEWS.play = () => {
 VIEWS.about = () => {
   const f = S.feed || {}, chk = f.check || {};
   const box = el("div", {});
-  Promise.all([get("model.json"), get("monitoring.json")]).then(([m, mon]) => box.replaceChildren(modelBlock(m, mon)));
+  Promise.all([get("model.json"), get("monitoring.json")]).then(([m, mon]) => fill(box, modelBlock(m, mon)));
   ctxLayer?.clearLayers(); drawVehicles(null);
   const files = ["status.json", "vehicles.json", `board/${B.day}.json`, "summary.json", "routes.json", "recent_ghosts.json", "model.json", "monitoring.json"];
   return [
@@ -1619,9 +1624,9 @@ function rpUpdateHud(on, started) {
   if (started !== rp.shown) {
     rp.shown = started;
     const box = document.getElementById("rp-feed");
-    if (box) box.replaceChildren(...RP.ghosts.slice(Math.max(0, started - 5), started).reverse().map((g, k) =>
+    if (box) fill(box, ...RP.ghosts.slice(Math.max(0, started - 5), started).reverse().map((g, k) =>
       el("li", { class: k === 0 && rp.playing ? "new" : null }, el("span", { class: "rt" }, g.route), el("span", {}, el("b", {}, `${g.time} never came`), el("small", {}, `${shortStop(g.from)} to ${shortStop(g.to)} · ${g.op}`)))));
-    if (box && !started) box.replaceChildren(el("li", { class: "muted" }, "No ghost buses yet. Press play."));
+    if (box && !started) fill(box, el("li", { class: "muted" }, "No ghost buses yet. Press play."));
   }
 }
 function rpLoop(ts) {
@@ -1650,8 +1655,8 @@ function stopReplay() {
 VIEWS.replay = () => {
   const box = el("div", {}, el("p", { class: "muted" }, "Loading a whole day of buses…"));
   loadReplay().then((d) => {
-    if (!d) { box.replaceChildren(el("p", { class: "muted" }, "The replay isn’t ready yet. It’s built each morning from the day before.")); return; }
-    if (!map) { box.replaceChildren(el("p", { class: "muted" }, "The replay needs the map, which couldn’t load.")); return; }
+    if (!d) { fill(box, el("p", { class: "muted" }, "The replay isn’t ready yet. It’s built each morning from the day before.")); return; }
+    if (!map) { fill(box, el("p", { class: "muted" }, "The replay needs the map, which couldn’t load.")); return; }
     if (parseHash().kind !== "replay") return;
     const first = !rpCanvas;
     startReplay();
@@ -1659,7 +1664,7 @@ VIEWS.replay = () => {
     const day = new Date(`${d.day}T12:00:00`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
     const speeds = [[300, "Slow"], [1200, "Normal"], [3600, "Fast"]];
     const maxG = Math.max(1, ...d.by_hour.map((x) => x[2]));
-    box.replaceChildren(
+    fill(box, 
       el("div", { class: "rp-top" },
         el("div", { class: "rp-clock" }, el("b", { id: "rp-clock" }, rpClock(rp.t)), el("small", {}, day)),
         el("div", { class: "rp-count" }, el("span", {}, el("b", { id: "rp-on" }, "0"), el("small", {}, "buses on the road")),
@@ -1748,7 +1753,7 @@ VIEWS.report = () => {
   const box = el("div", {}, el("p", { class: "muted" }, "Loading the report…"));
   Promise.all([WK ? WK : get("weekly.json"), loadPatterns(), get("operators.json")]).then(([w, pat, opsAll]) => {
     WK = w;
-    if (!w || !w.judged) { box.replaceChildren(el("p", { class: "muted" }, "The first weekly report needs a few more days of data.")); return; }
+    if (!w || !w.judged) { fill(box, el("p", { class: "muted" }, "The first weekly report needs a few more days of data.")); return; }
     const up = w.prev?.rate != null && w.rate > w.prev.rate;
     const lead = el("p", { class: "wk-lead" }, el("b", {}, `${oneIn(w.rate)} timetabled buses never turned up`),
       ` between ${dm(w.from)} and ${dm(w.to)}: ${num(w.ghosts)} ghost buses out of ${num(w.judged)} checked against live GPS`,
@@ -1768,11 +1773,11 @@ VIEWS.report = () => {
       b.textContent = "Share this report as an image";
     } }, "Share this report as an image");
     const opRows = w.operators.map((o) => el("tr", {}, el("td", {}, o.operator), el("td", { class: "n" }, num(o.judged)), el("td", { class: "n" }, pct(o.rate)), el("td", { class: "n" }, change(o.rate, o.prev_rate))));
-    box.replaceChildren(
+    fill(box, 
       lead,
       el("div", { class: "stats" }, stat(oneIn(w.rate), "never came", "ghost"), stat(num(w.ghosts), "ghost buses"), stat(num(w.judged), "buses checked"),
         w.worst_hour ? stat(`${String(w.worst_hour.hour).padStart(2, "0")}:00`, `worst hour (${pct(w.worst_hour.rate, 0)} missing)`) : null),
-      el("div", { class: "chips" }, sh, el("a", { class: "chip quiet", href: "#/replay" }, "▶ Watch a whole day replayed"), el("a", { class: "chip quiet", href: "#/hotspots" }, "Where buses vanish")),
+      el("div", { class: "chips" }, sh, el("a", { class: "chip quiet", href: "#/replay" }, "▶ Watch a whole day replayed"), el("a", { class: "chip quiet", href: "#/hotspots" }, "Where buses vanish"), el("a", { class: "chip quiet", href: "#/forecast" }, "Today’s forecast"), el("a", { class: "chip quiet", href: "#/data" }, "Download the data")),
       section("Day by day", days),
       gotw,
       section("Worst routes this week", el("div", { class: "wk-list" }, w.worst.map(routeLine)), el("p", { class: "muted small" }, "Routes with at least 80 checked departures this week. ▲ ▼ compare with the week before.")),
@@ -1874,7 +1879,7 @@ function stopRecord(it) {
     if (a.n < 20) return;
     const rate = a.g / a.n, wt = worseThan(rate), bad = rate >= 0.05;
     box.classList.toggle("bad", bad);
-    box.replaceChildren(
+    fill(box, 
       el("span", { class: "stop-rec-big" }, oneIn(rate)),
       el("span", { class: "stop-rec-txt" }, el("b", {}, rate ? `buses due here never came` : "Every bus due here has turned up"),
         el("small", {}, `${num(a.g)} of ${num(a.n)} checked since ${dm(d.from)}`, a.n7 >= 20 ? ` · last 7 days ${pct(a.g7 / a.n7, 1)}` : "",
@@ -1889,7 +1894,7 @@ let hotWindow = "all";
 VIEWS.hotspots = () => {
   const box = el("div", {}, el("p", { class: "muted" }, "Loading every stop…"));
   loadStops().then((d) => {
-    if (!d) { box.replaceChildren(el("p", { class: "muted" }, "Stop records aren’t ready yet.")); return; }
+    if (!d) { fill(box, el("p", { class: "muted" }, "Stop records aren’t ready yet.")); return; }
     if (parseHash().kind !== "hotspots") return;
     const seven = hotWindow === "7";
     const pick = (r) => (seven ? [r.n7, r.g7] : [r.n, r.g]);
@@ -1912,7 +1917,7 @@ VIEWS.hotspots = () => {
     const seen = new Set(), top = [];
     for (const r of worst) { const k = `${r.nn}|${r.gg}`; if (seen.has(r.name) || seen.has(k)) continue; seen.add(r.name); seen.add(k); top.push(r); if (top.length >= 12) break; }
     const most = [...d.rows].sort((a, b) => pick(b)[1] - pick(a)[1]).slice(0, 5);
-    box.replaceChildren(
+    fill(box, 
       tabs([["all", `Since ${dm(d.from)}`], ["7", "Last 7 days"]], hotWindow, (k) => { hotWindow = k; render(); }),
       el("div", { class: "heat-key dots" }, [["#0E9F6E", "under 3%"], ["#E08A00", "3–6%"], ["#D92D20", "6–12%"], ["#7c3aed", "12%+ never came"]].map(([c, w]) => el("span", {}, el("i", { style: `background:${c}` }), w)),
         el("span", {}, "· the bigger the circle, the more often buses due there never came")),
@@ -1991,6 +1996,136 @@ function operatorRace(ops) {
     el("div", { class: "race-top" }, label, play), stage, slider);
 }
 
+// ---------------------------------------------------------------- the ghost forecast: what the model expects
+let FC = null;
+const dayLong = (d) => new Date(`${d}T12:00:00`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+VIEWS.forecast = () => {
+  const box = el("div", {}, el("p", { class: "muted" }, "Loading the forecast…"));
+  (FC ? Promise.resolve(FC) : get("forecast.json")).then((f) => {
+    FC = f;
+    if (!f?.departures) { fill(box, el("p", { class: "muted" }, "The model hasn’t made a forecast yet.")); return; }
+    const level = f.rate >= 0.08 ? ["Stormy", "storm", "⛈"] : f.rate >= 0.05 ? ["Unsettled", "rain", "🌧"] : f.rate >= 0.025 ? ["Mostly fine", "cloud", "⛅"] : ["Clear", "sun", "☀"];
+    const maxH = Math.max(0.01, ...f.by_hour.map(([, n, e]) => (n ? e / n : 0)));
+    const hours = el("div", { class: "fc-hours", role: "img", "aria-label": "Expected share of buses that won’t run, by hour" },
+      Array.from({ length: 24 }, (_, h) => { const x = f.by_hour.find((y) => y[0] === h); const r = x && x[1] ? x[2] / x[1] : 0;
+        const b = el("div", { title: `${String(h).padStart(2, "0")}:00 · ${x ? `${pct(r, 0)} expected not to run (${x[1]} departures)` : "no buses"}` });
+        b.style.height = `${(r / maxH) * 100}%`; b.className = r >= 0.1 ? "hi" : ""; return b; }));
+    const tr = f.track || [];
+    const maxT = Math.max(1, ...tr.flatMap((t) => [t[2], t[3]]));
+    const track = tr.length ? el("div", { class: "fc-track" }, tr.map(([d, n, e, a]) => el("div", { title: `${dm(d)}: expected ${e}, actually ${a} (of ${num(n)} checked)` },
+      el("span", { class: "pair" }, el("i", { class: "exp", style: `height:${(e / maxT) * 100}%` }), el("i", { class: "act", style: `height:${(a / maxT) * 100}%` })),
+      el("small", {}, new Date(`${d}T12:00:00`).toLocaleDateString("en-GB", { weekday: "narrow" }))))) : null;
+    fill(box, 
+      el("div", { class: `fc-hero ${level[1]}` }, el("span", { class: "fc-ico", "aria-hidden": "true" }, level[2]),
+        el("span", {}, el("small", {}, dayLong(f.day)), el("b", {}, level[0]),
+          el("span", {}, `About ${num(Math.round(f.expected))} of ${num(f.departures)} timetabled buses are expected not to run (${pct(f.rate, 1)}).`))),
+      section("Through the day", hours, el("div", { class: "hours-axis" }, ["00", "06", "12", "18", "23"].map((h) => el("span", {}, `${h}:00`)))),
+      section("Departures most at risk", el("div", { class: "wk-list" }, f.risky.slice(0, 10).map((x) => el("a", { class: "wk-row", href: href("route", x.id) + "/history" },
+        el("span", { class: "rt" }, x.route), el("span", { class: "wk-name" }, el("b", {}, `${x.time} from ${shortStop(x.from) || "the first stop"}`), el("small", {}, `${x.operator}${x.to ? ` · to ${shortStop(x.to)}` : ""}`)),
+        el("span", { class: "wk-bar" }, el("i", { style: `width:${(1 - x.p_runs) * 100}%;background:var(--vlate)` })),
+        el("span", { class: "wk-rate" }, el("b", {}, `${Math.round((1 - x.p_runs) * 100)}%`), el("small", { class: "muted" }, "chance it won’t run")))))),
+      section("Routes most at risk", el("div", { class: "wk-list" }, f.routes.slice(0, 6).map((x) => el("a", { class: "wk-row", href: href("route", x.id) + "/history" },
+        el("span", { class: "rt" }, x.route), el("span", { class: "wk-name" }, el("b", {}, x.operator), el("small", {}, `about ${x.expected} of ${x.departures} departures`)),
+        el("span", { class: "wk-bar" }, el("i", { style: `width:${Math.min(100, (x.rate / 0.3) * 100)}%` })), el("span", { class: "wk-rate" }, el("b", {}, pct(x.rate, 0))))))),
+      track ? section("How good were the forecasts?", el("p", { class: "muted small" }, "Each day: buses the model expected not to run (light) against buses that actually never came (dark), on the trips we could check."),
+        track, el("div", { class: "heat-key" }, el("i", { class: "k exp" }), el("span", {}, "expected"), el("i", { class: "k act" }, ""), el("span", {}, "actually never came"))) : null,
+      el("p", { class: "muted small" }, `Made by the live model (version ${f.model_version || "?"}) from each departure’s route, time, weekday and recent record. A new model only goes live if it beats the old one on days neither has seen. A forecast is a chance, not a promise: check the live map before you leave.`),
+      el("div", { class: "chips" }, el("a", { class: "chip quiet", href: "#/about" }, "How the model works"), el("a", { class: "chip quiet", href: "#/reliability/accuracy" }, "Live accuracy")));
+  });
+  ctxLayer?.clearLayers(); drawVehicles(null);
+  return [el("div", { class: "head" }, el("p", { class: "kicker" }, "Ghost forecast"), el("h2", {}, "Will the buses turn up today?")), box];
+};
+
+// ---------------------------------------------------------------- story mode: the numbers, one screen at a time
+let storyTimer = null;
+VIEWS.story = () => {
+  Promise.all([WK ? WK : get("weekly.json"), loadStops(), loadPatterns(), FC ? FC : get("forecast.json")]).then(([w, st, pat, fc]) => {
+    WK = w; FC = fc;
+    if (parseHash().kind !== "story") return;
+    const slides = [];
+    if (SUM?.judged) slides.push(["Since " + dm(SUM.first_day), `${num(SUM.judged)}`, "Sheffield buses checked against their own GPS, one by one.", "violet"]);
+    if (SUM?.ghosts) slides.push(["Never came", `${num(SUM.ghosts)}`, `buses were on the timetable but never turned up. That’s ${oneIn(SUM.ghost_rate)}.`, "ghost"]);
+    if (w?.rate) slides.push([`${dm(w.from)} to ${dm(w.to)}`, oneIn(w.rate), w.prev?.rate ? `buses never came last week, ${w.rate > w.prev.rate ? "up" : "down"} from ${oneIn(w.prev.rate)} the week before.` : "buses never came last week.", w.prev?.rate && w.rate > w.prev.rate ? "red" : "green"]);
+    const ew = w?.extra_wait_all;
+    if (ew?.median_min) slides.push(["The cost", `${Math.round(ew.median_min)} min`, `When a bus vanished, the next one on that route came a median of ${Math.round(ew.median_min)} minutes later. Half the time it was over half an hour.`, "amber"]);
+    if (w?.worst?.[0]) slides.push(["Worst route last week", `Route ${w.worst[0].route}`, `${w.worst[0].operator}: ${oneIn(w.worst[0].rate)} buses never came.`, "red"]);
+    if (st) { const s0 = st.rows.filter((r) => r.n >= 150).sort((a, b) => b.g / b.n - a.g / a.n)[0]; if (s0) slides.push(["Worst stop", shortStop(s0.name), `${pct(s0.g / s0.n, 0)} of the buses due here never came (${num(s0.g)} of ${num(s0.n)}).`, "violet"]); }
+    if (pat?.city) { const c = pat.city.filter((x) => x[2] >= 200).sort((a, b) => b[3] / b[2] - a[3] / a[2])[0]; if (c) slides.push(["Worst time to wait", `${WD[c[0]]} ${String(c[1]).padStart(2, "0")}:00`, `${pct(c[3] / c[2], 0)} of buses at that hour never came.`, "amber"]); }
+    if (fc?.departures) slides.push([`Forecast for ${dayLong(fc.day)}`, `~${num(Math.round(fc.expected))}`, "buses the model expects not to run. Check yours before you wait in the cold.", "green"]);
+    slides.push(["Ghost Bus", "Is your bus actually coming?", "Live GPS for every bus in Sheffield, and the ones that never came.", "end"]);
+    let k = 0;
+    const bars = el("div", { class: "st-bars" }, slides.map(() => el("i", {}, el("b"))));
+    const body = el("div", { class: "st-body" });
+    const close = el("a", { class: "st-close", href: "#/", "aria-label": "Close" }, "✕");
+    const shell = el("div", { class: "story", id: "story", role: "dialog", "aria-label": "Ghost Bus in numbers" }, bars, close, body,
+      el("button", { type: "button", class: "st-nav prev", "aria-label": "Previous", onclick: () => show(k - 1) }), el("button", { type: "button", class: "st-nav next", "aria-label": "Next", onclick: () => show(k + 1) }));
+    const show = (n) => {
+      clearTimeout(storyTimer);
+      k = Math.max(0, Math.min(slides.length - 1, n));
+      const [kick, big, line, theme] = slides[k];
+      shell.className = `story ${theme}`;
+      bars.querySelectorAll("i").forEach((b, j) => { b.className = j < k ? "done" : j === k ? "on" : ""; });
+      body.replaceChildren(...[el("small", {}, kick), el("b", { class: big.length > 12 ? "long" : "" }, big), el("p", {}, line),
+        theme === "end" ? el("div", { class: "st-act" }, el("a", { class: "chip", href: "#/" }, "Open the live map"), el("a", { class: "chip quiet", href: "#/report" }, "Read the full report"),
+          shareImageButton(() => cardImage({ kicker: `Since ${dm(SUM.first_day)}`, big: oneIn(SUM.ghost_rate), line: "Sheffield buses never turned up",
+            sub: `${num(SUM.ghosts)} ghost buses out of ${num(SUM.judged)} checked against live GPS`, highlight: ew?.median_min ? `Each one meant a median ${Math.round(ew.median_min)} min wait for the next` : null }), "ghost-bus-sheffield", "Sheffield’s ghost buses", "Share")) : null,
+        theme !== "end" ? el("span", { class: "st-ghost", "aria-hidden": "true" }, "👻") : null].filter(Boolean));
+      if (k < slides.length - 1 && !reduced) storyTimer = setTimeout(() => show(k + 1), 5200);
+    };
+    document.getElementById("story")?.remove();
+    document.body.append(shell);
+    shell.addEventListener("keydown", (e) => { if (e.key === "ArrowRight") show(k + 1); if (e.key === "ArrowLeft") show(k - 1); if (e.key === "Escape") location.hash = "#/"; });
+    shell.tabIndex = -1; shell.focus();
+    show(0);
+  });
+  return [el("h2", { class: "vh" }, "Ghost Bus in numbers")];
+};
+
+// ---------------------------------------------------------------- open data
+const RAW_DATA = "https://raw.githubusercontent.com/Mohammed-890/ghost-bus/data/";
+VIEWS.data = () => {
+  const site = new URL(`${DATA}/`, location.href).href;
+  const files = [
+    ["summary.json", "Headline numbers: trips checked, ghosts, the ghost rate, feed health."],
+    ["routes.json", "Every route: departures, checked, ghosts, rate, not checked, last 7 days."],
+    ["routes/<route-id>.json", "One route: by hour, by day and every departure’s record, with the model’s chance it runs."],
+    ["operators.json", "Every operator, with a daily series."],
+    ["stops.json", "Every stop: buses due, ghosts, all days and the last 7."],
+    ["patterns.json", "Weekday × hour counts for the city and busy routes."],
+    ["weekly.json", "This week against last week, worst and best routes, extra wait."],
+    ["forecast.json", "The model’s forecast for every departure on the next day, and its track record."],
+    ["replay.json", "One whole day of bus tracks and ghost paths (delta-encoded)."],
+    ["daily.json", "Scheduled, checked and ghost counts per day."],
+  ];
+  const raw = [
+    ["results/<YYYY-MM-DD>.csv.gz", "The verdict for every timetabled trip that day: ran (tracked), ran (matched), ghost or not checked, with the reason and the evidence."],
+    ["raw/<YYYY-MM-DD>/<HH>.csv.gz", "Every GPS ping from the live feed, every 60 seconds, as received."],
+    ["health/<YYYY-MM-DD>.csv.gz", "One row per poll: did the feed answer, how many buses, how many sent a trip."],
+    ["predictions/<YYYY-MM-DD>.csv.gz", "The model’s chance each trip runs, saved before the day so it can be scored after."],
+  ];
+  const row = (base, [p, what]) => el("tr", {}, el("td", {}, p.includes("<") ? el("code", {}, p) : el("a", { href: base + p }, el("code", {}, p))), el("td", {}, what));
+  const today = SUM?.last_day;
+  ctxLayer?.clearLayers(); drawVehicles(null);
+  return [el("div", { class: "head" }, el("p", { class: "kicker" }, "Open data"), el("h2", {}, "Use the data"),
+    el("p", { class: "muted" }, "Everything on this site is free to reuse: for journalists, councillors, researchers and other apps. No key, no sign-up.")),
+    section("Website data (JSON, refreshed daily)", el("table", { class: "tbl data-tbl" }, el("tbody", {}, files.map((f) => row(site, f))))),
+    section("The full record (CSV, gzip)", el("p", { class: "muted small" }, "On the repository’s ", el("code", {}, "data"), " branch, one file per day."),
+      el("table", { class: "tbl data-tbl" }, el("tbody", {}, raw.map((f) => row(RAW_DATA, f)))),
+      today ? el("p", { class: "small" }, "Example: ", el("a", { href: `${RAW_DATA}results/${today}.csv.gz` }, `results for ${dm(today)}`), ".") : null),
+    section("Live, every 2 minutes", el("p", { class: "small" }, el("code", {}, "status.json"), " (one letter per departure today) and ", el("code", {}, "vehicles.json"), " (every bus on GPS, matched to its trip) on the ",
+      el("a", { href: "https://github.com/Mohammed-890/ghost-bus/tree/live" }, "live branch"), ".")),
+    section("Put a stop’s live times on your website", el("p", { class: "small" }, "Any stop page has an “Embed” button with a copy-and-paste snippet.")),
+    el("p", { class: "muted small" }, "Source: Bus Open Data Service, Department for Transport, under the Open Government Licence v3.0. Please credit “Ghost Bus Detector” and link back. How a ghost is decided is on the About page.")];
+};
+function embedButton(key, label) {
+  const b = el("button", { type: "button", class: "icon-btn", onclick: async () => {
+    const src = new URL(`embed.html?stop=${encodeURIComponent(key)}`, location.href).href;
+    const code = `<iframe src="${src}" title="Live buses at ${label.replace(/"/g, "")}" width="360" height="420" style="border:0;border-radius:12px"></iframe>`;
+    try { await navigator.clipboard.writeText(code); toast("Embed code copied. Paste it into any web page."); } catch { prompt("Copy this code:", code); }
+  } }, "Embed");
+  return b;
+}
+
 // ---------------------------------------------------------------- router
 function parseHash() {
   const [, kind = "home", key = "", sub = "", extra = ""] = (location.hash.replace(/^#\/?/, "#/").match(/^#\/([^/]*)\/?([^/]*)\/?([^/]*)\/?([^/]*)/) || []);
@@ -2005,6 +2140,8 @@ function render(reset) {
   if (h.kind !== "replay") stopReplay();
   document.body.classList.toggle("tv-on", h.kind === "board");
   if (h.kind !== "board") { $("#tv")?.remove(); clearInterval(tvTimer); }
+  if (h.kind !== "story") { $("#story")?.remove(); clearTimeout(storyTimer); }
+  document.body.classList.toggle("story-on", h.kind === "story");
   if (!same) current = { ...h, fitted: false, filter: h.kind === current.kind && h.key === current.key ? current.filter : null };
   const fn = VIEWS[h.kind] || VIEWS.home;
   const panel = $("#view"), top = panel.scrollTop;

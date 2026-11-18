@@ -88,3 +88,10 @@ def test_stops_count_every_stop_a_ghost_should_have_served(tmp_path, monkeypatch
     d = insights.build_stops(res, min_n=1)
     rows = {r[1]: r for r in d["stops"]}
     assert rows["One"][4:6] == [2, 1] and rows["Two"][4:6] == [2, 1]
+
+
+def test_extra_wait_is_the_gap_to_the_next_bus_that_ran():
+    rows = [{"service_date": date(2026, 11, 16), "route": "52", "operator": "Op", "direction_id": "0", "from_stop": "A",
+             "start_secs": s, "verdict": v} for s, v in ((3600, "ran_tracked"), (5400, "ghost"), (7200, "ghost"), (9000, "ran_tracked"))]
+    w = insights.extra_wait(pd.DataFrame(rows))
+    assert w["ghosts"] == 2 and w["median_min"] == 45.0       # 60 and 30 minutes to the 02:30 bus

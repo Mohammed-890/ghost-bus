@@ -202,7 +202,9 @@ def build_weekly(results: pd.DataFrame) -> dict:
             "prev": {"judged": int(len(prev)), "ghosts": int(prev.g.sum()), "rate": rate(prev),
                      "from": str(min(prev.service_date)) if len(prev) else None, "to": str(max(prev.service_date)) if len(prev) else None},
             "worst": worst, "best": best, "improved": improved, "worsened": worse, "operators": ops,
-            "worst_hour": worst_hour, "by_day": day_rows, "ghost_of_the_week": gotw}
+            "worst_hour": worst_hour, "by_day": day_rows, "ghost_of_the_week": gotw,
+            "extra_wait": extra_wait(results[results.service_date > last - timedelta(days=7)]),
+            "extra_wait_all": extra_wait(results)}
 
 
 # ---------------------------------------------------------------- stops: where buses vanish
@@ -228,13 +230,85 @@ def build_stops(results: pd.DataFrame, min_n: int = 20) -> dict:
     return {"from": str(min(j.service_date)), "to": str(last), "fields": ["id", "name", "lat", "lon", "n", "ghosts", "n7", "ghosts7"], "stops": rows}
 
 
+# ---------------------------------------------------------------- forecast: tomorrow, from the live model
+def build_forecast(results: pd.DataFrame) -> dict:
+    """The champion model's chance that each departure runs, for the latest predicted day, plus how
+    earlier forecasts compared with what actually happened."""
+    pdir = C.DATA / "predictions"
+    files = sorted(pdir.glob("*.csv.gz")) if pdir.exists() else []
+    if not files:
+        return {}
+    f = files[-1]
+    day = f.name[:10]
+    p = pd.read_csv(f, dtype={"trip_id": str, "route": str, "direction_id": str, "model_version": str})
+    sched = C.SCHEDULE / day / "trips.csv.gz"
+    if sched.exists():
+        t = pd.read_csv(sched, dtype={"trip_id": str})[["trip_id", "from_stop", "to_stop"]]
+        p = p.merge(t, on="trip_id", how="left")
+    else:
+        p["from_stop"], p["to_stop"] = "", ""
+    # the timetable lists many departures more than once (overlapping versions): count each once
+    p = (p.groupby(["route", "operator", "direction_id", "start_secs", "from_stop", "to_stop"], dropna=False)
+          .p_runs.mean().reset_index())
+    p["miss"] = 1 - p.p_runs
+    p["h"] = (p.start_secs // 3600).astype(int) % 24
+    hours = p.groupby("h").agg(n=("miss", "size"), exp=("miss", "sum"))
+    r = p.groupby(["route", "operator"]).agg(n=("miss", "size"), exp=("miss", "sum")).reset_index()
+    r = r[r.n >= 10].assign(rate=lambda d: d.exp / d.n).sort_values("rate", ascending=False).head(10)
+    risky = p[p.start_secs.between(5 * 3600, 23 * 3600)].sort_values("p_runs").head(15)
+
+    track = []
+    for pf in files[-14:]:
+        d = pf.name[:10]
+        rf = C.RESULTS / f"{d}.csv.gz"
+        if not rf.exists():
+            continue
+        pr = pd.read_csv(pf, dtype={"trip_id": str})[["trip_id", "p_runs"]]
+        rr = pd.read_csv(rf, dtype={"trip_id": str})
+        j = rr[rr.verdict.isin(JUDGED)].merge(pr, on="trip_id")
+        if len(j) >= 200:
+            track.append([d, int(len(j)), round(float((1 - j.p_runs).sum()), 1), int((j.verdict == "ghost").sum())])
+    version = None
+    try:
+        version = str(pd.read_csv(f, usecols=["model_version"]).model_version.iloc[0])
+    except Exception:
+        pass
+    return {"day": day, "model_version": version, "departures": int(len(p)), "expected": round(float(p.miss.sum()), 1),
+            "rate": round(float(p.miss.mean()), 4),
+            "by_hour": [[int(h), int(x.n), round(float(x.exp), 2)] for h, x in hours.iterrows()],
+            "routes": [{"id": _slug(f"{x.route}-{x.operator}"), "route": x.route, "operator": x.operator, "departures": int(x.n),
+                        "expected": round(float(x.exp), 1), "rate": round(float(x.rate), 4)} for x in r.itertuples()],
+            "risky": [{"route": x.route, "operator": x.operator, "time": _hhmm(x.start_secs), "from": x.from_stop if isinstance(x.from_stop, str) else "",
+                       "to": x.to_stop if isinstance(x.to_stop, str) else "", "p_runs": round(float(x.p_runs), 3),
+                       "id": _slug(f"{x.route}-{x.operator}")} for x in risky.itertuples()],
+            "track": track}
+
+
+def extra_wait(results: pd.DataFrame) -> dict:
+    """When a bus never came, how long until the next one on the same route, direction and first stop did?"""
+    r = results[results.verdict.isin(JUDGED)][["service_date", "route", "operator", "direction_id", "from_stop", "start_secs", "verdict"]]
+    r = r.sort_values("start_secs")
+    gaps = []
+    for _, g in r.groupby(["service_date", "route", "operator", "direction_id", "from_stop"], dropna=False):
+        ran = g[g.verdict != "ghost"].start_secs.to_numpy()
+        for s in g[g.verdict == "ghost"].start_secs.to_numpy():
+            k = np.searchsorted(ran, s, side="right")
+            if k < len(ran) and ran[k] - s <= 3 * 3600:
+                gaps.append((ran[k] - s) / 60)
+    if not gaps:
+        return {}
+    a = np.array(gaps)
+    return {"ghosts": int(len(a)), "median_min": round(float(np.median(a)), 1), "mean_min": round(float(a.mean()), 1),
+            "over_30": round(float((a > 30).mean()), 3), "total_hours": round(float(a.sum() / 60), 0)}
+
+
 def build_all(results: pd.DataFrame, write) -> dict:
     """Write the three files with publish's writer. Each part fails on its own without stopping the others."""
     done = {}
     if results.empty:
         return done
     for name, fn in (("patterns.json", lambda: build_patterns(results)), ("weekly.json", lambda: build_weekly(results)),
-                     ("stops.json", lambda: build_stops(results))):
+                     ("stops.json", lambda: build_stops(results)), ("forecast.json", lambda: build_forecast(results))):
         try:
             write(name, fn())
             done[name] = True
