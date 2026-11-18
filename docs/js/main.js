@@ -7,7 +7,7 @@
 //   summary.json, routes.json, routes/<id>.json, recent_ghosts.json, shapes.json, model.json, monitoring.json
 // The two live files come from the `live` branch (updated every ~2 minutes); the copies on the site
 // (updated every ~13 minutes) are the fallback.
-import { createAssistant } from "./assistant.js?v=18";
+import { createAssistant } from "./assistant.js?v=19";
 
 const qs = new URLSearchParams(location.search);
 const DATA = qs.get("data") || "data";
@@ -2132,7 +2132,7 @@ function embedButton(key, label) {
 
 // ---------------------------------------------------------------- sound for the replays
 let SND = null;
-async function sound() { if (!SND) { const m = await import("./sound.js?v=18"); SND = m.createSound(); } return SND; }
+async function sound() { if (!SND) { const m = await import("./sound.js?v=19"); SND = m.createSound(); } return SND; }
 function soundButton() {
   const b = el("button", { type: "button", class: "chip quiet", "aria-pressed": String(!!SND?.on), onclick: async () => {
     const s = await sound();
@@ -2169,7 +2169,7 @@ VIEWS.city = () => {
       el("p", { class: "city-hint" }, "Drag to turn, scroll or pinch to zoom. Tap a ghost for its route, or a beam to fly to that stop.")));
   document.body.append(shell);
   let lastGone = 0;
-  Promise.all([loadReplay(), get("shapes.json"), loadStops(), import("./city.js?v=18")]).then(([rpd, shapes, st, mod]) => {
+  Promise.all([loadReplay(), get("shapes.json"), loadStops(), import("./city.js?v=19")]).then(([rpd, shapes, st, mod]) => {
     if (parseHash().kind !== "city" || !shell.isConnected) return;
     if (!rpd) { loading.replaceChildren(el("p", {}, "The replay isn’t ready yet. Come back tomorrow morning.")); return; }
     $("#city-day").textContent = `${new Date(`${rpd.day}T12:00:00`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })} · ${num(rpd.totals.vehicles)} buses, ${num(rpd.totals.ghosts)} ghosts`;

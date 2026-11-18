@@ -1,7 +1,7 @@
 // Offline support: the app still opens with no signal and shows the last bus data it saw.
 // Pages and data: network first, falling back to the last copy. Versioned files (?v=) and fonts: cache first.
-const CACHE = "ghostbus-v18";
-const SHELL = ["./", "index.html", "css/app.css?v=18", "js/main.js?v=18", "js/assistant.js?v=18", "vendor/leaflet/leaflet.js", "vendor/leaflet/leaflet.css",
+const CACHE = "ghostbus-v19";
+const SHELL = ["./", "index.html", "css/app.css?v=19", "js/main.js?v=19", "js/assistant.js?v=19", "vendor/leaflet/leaflet.js", "vendor/leaflet/leaflet.css",
   "fonts/atkinson-hyperlegible-latin-400-normal.woff2", "fonts/atkinson-hyperlegible-latin-700-normal.woff2", "icon.svg", "manifest.webmanifest"];
 
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
