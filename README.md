@@ -30,6 +30,14 @@ Real screenshots of the live site.
 
 ![Hotspots map of where buses vanish](docs/img/app-hotspots.jpg)
 
+**Ghost forecast:** the live model's forecast for every departure today, told like the weather, with its own track record against what really happened. When a bus does vanish, the next one on that route comes a median of 32 minutes later.
+
+| Forecast | Story mode: the numbers in 60 seconds |
+|---|---|
+| ![Ghost forecast](docs/img/app-forecast.jpg) | ![Story mode](docs/img/app-story.jpg) |
+
+**Open data and an embeddable widget:** every file is free to reuse (`#/data`), and any stop's live times can go on another website with one copied snippet (`embed.html?stop=…`).
+
 **Departure board for a screen:** a full-screen live board for any stop, for a TV in a café, library or student union.
 
 ![Live departure board for Arundel Gate](docs/img/app-board.jpg)
