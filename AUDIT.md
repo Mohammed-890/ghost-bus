@@ -150,6 +150,16 @@ Checked: 41 Python tests pass (3 new for the builders). The 147-question assista
 
 Checked: 42 Python tests pass, the 147-question regression gives the same intents, and the browser QA passes with no console errors at desktop and phone widths.
 
+## 10. Built in round five
+
+1. **Ghost forecast** (`#/forecast`). The live model's forecast for every departure on the day, told like a weather forecast (clear, mostly fine, unsettled, stormy), with the hours and departures most at risk. It also shows its own track record: buses expected not to run against buses that actually never came, day by day. The early forecasts under-predicted, and the page shows that rather than hiding it. Data: `forecast.json` (`insights.build_forecast`, each departure counted once even when the timetable lists it several times).
+2. **The cost of a ghost.** When a bus never came, how long until the next bus on the same route, direction and first stop actually ran: a median of 32 minutes since 1 November, and over 30 minutes half the time (`insights.extra_wait`, in `weekly.json`).
+3. **Story mode** (`#/story`). Sheffield's ghost buses in 60 seconds, one full-screen number at a time, ending in a share image.
+4. **Open data** (`#/data`). Every JSON file and the full daily CSV record, with what each holds, under the Open Government Licence.
+5. **An embeddable widget** (`embed.html?stop=…`). Live departures for any stop on any website, light and dark. Every stop page has an "Embed" button that copies the code.
+
+Checked: 43 Python tests pass, the 147-question regression gives the same intents, and the browser QA passes with no console errors at desktop and phone widths.
+
 ### Still needs hosting or external access
 
 | Feature | What's missing |
