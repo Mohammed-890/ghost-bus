@@ -160,6 +160,13 @@ Checked: 42 Python tests pass, the 147-question regression gives the same intent
 
 Checked: 43 Python tests pass, the 147-question regression gives the same intents, and the browser QA passes with no console errors at desktop and phone widths.
 
+## 11. Built in round six
+
+1. **Ghost City** (`#/city`). Sheffield at night in 3D (Three.js, vendored, loaded only on this page). Every route is a neon line coloured from teal (reliable) through pink to violet (buses vanish often). Every stop with enough data is a tower as tall as the number of buses that never came there. A whole day replays over it: yellow lights for the buses that drove, and glowing ghosts floating along the routes they never drove, with a beam of light where each one went missing. You can turn it, zoom in, hover a tower for its record, click it to fly there, or click a ghost to open its route. If a browser can't do WebGL, it says so and offers the 2D replay.
+2. **Sound** for the replay and Ghost City (Web Audio, no files). A low drone swells with the number of buses on the road, and each bus that never came plays a falling "wooo", panned left or right. It's off until you press it.
+
+Checked: 43 Python tests, the 147-question regression, the browser QA and the new-feature checks all pass with no console errors. Ghost City was rendered in headless Chromium (software WebGL) at desktop and phone sizes.
+
 ### Still needs hosting or external access
 
 | Feature | What's missing |
