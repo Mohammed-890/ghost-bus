@@ -2151,22 +2151,22 @@ VIEWS.city = () => {
   document.body.classList.add("city-on");
   const host = el("div", { class: "city-gl" });
   const tip = el("div", { class: "city-tip", hidden: true });
-  const clock = el("b", { class: "city-clock" }, "05:30"), on = el("b", {}, "0"), gone = el("b", { class: "g" }, "0");
+  const clock = el("b", { class: "city-clock" }, "06:30"), on = el("b", {}, "0"), gone = el("b", { class: "g" }, "0");
   const play = el("button", { type: "button", class: "chip", onclick: () => { if (!CITY) return; CITY.state.playing = !CITY.state.playing; play.textContent = CITY.state.playing ? "❚❚ Pause" : "▶ Play"; } }, "❚❚ Pause");
-  const speeds = el("div", { class: "seg small", role: "group", "aria-label": "Speed" }, [[300, "Slow"], [1200, "Normal"], [3600, "Fast"]].map(([v, w]) =>
-    el("button", { type: "button", class: v === 1200 ? "on" : "", onclick: (e) => { if (CITY) CITY.state.speed = v; speeds.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === e.target)); } }, w)));
-  const range = el("input", { type: "range", class: "rp-range", min: 4.5 * 3600, max: 24 * 3600, step: 60, value: 5.5 * 3600, "aria-label": "Time of day", oninput: (e) => { if (CITY) CITY.state.t = +e.target.value; } });
+  const speeds = el("div", { class: "seg small", role: "group", "aria-label": "Speed" }, [[300, "Slow"], [900, "Normal"], [2700, "Fast"]].map(([v, w]) =>
+    el("button", { type: "button", class: v === 900 ? "on" : "", onclick: (e) => { if (CITY) CITY.state.speed = v; speeds.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === e.target)); } }, w)));
+  const range = el("input", { type: "range", class: "rp-range", min: 4.5 * 3600, max: 24 * 3600, step: 60, value: 6.5 * 3600, "aria-label": "Time of day", oninput: (e) => { if (CITY) CITY.state.t = +e.target.value; } });
   const loading = el("div", { class: "city-loading" }, el("span", { class: "ghost-spin", "aria-hidden": "true" }, "👻"), el("p", {}, "Building Ghost City…"));
   const shell = el("div", { id: "city", class: "city", role: "dialog", "aria-label": "Ghost City, Sheffield in 3D" }, host, loading, tip,
     el("div", { class: "city-top" },
       el("div", {}, el("small", {}, "Ghost City"), el("h1", {}, "Sheffield’s buses, in 3D"), el("p", { id: "city-day" }, "")),
       el("a", { class: "city-x", href: "#/", "aria-label": "Close Ghost City" }, "✕")),
     el("div", { class: "city-key" }, el("span", {}, el("i", { class: "k-bus" }), "bus on the road"), el("span", {}, el("i", { class: "k-ghost" }), "bus that never came"),
-      el("span", {}, el("i", { class: "k-line" }), "route: teal reliable, pink to violet missing more"), el("span", {}, el("i", { class: "k-tower" }), "tower: buses that never came at that stop")),
+      el("span", {}, el("i", { class: "k-line" }), "route: teal = reliable, pink to violet = buses often missing"), el("span", {}, el("i", { class: "k-glow" }), "pink glow: where buses vanish most"), el("span", {}, el("i", { class: "k-tower" }), "beam: the stops with the worst record")),
     el("div", { class: "city-bar" },
       el("div", { class: "city-now" }, clock, el("span", {}, on, el("small", {}, "on the road")), el("span", {}, gone, el("small", {}, "never came"))),
       el("div", { class: "city-ctl" }, play, speeds, soundButton()), range,
-      el("p", { class: "city-hint" }, "Drag to turn, scroll or pinch to zoom. Tap a ghost or a tower.")));
+      el("p", { class: "city-hint" }, "Drag to turn, scroll or pinch to zoom. Tap a ghost for its route, or a beam to fly to that stop.")));
   document.body.append(shell);
   let lastGone = 0;
   Promise.all([loadReplay(), get("shapes.json"), loadStops(), import("./city.js?v=18")]).then(([rpd, shapes, st, mod]) => {
