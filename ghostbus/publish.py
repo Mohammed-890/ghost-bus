@@ -145,6 +145,8 @@ def build():
     _w("model.json", evaluate(df))
     _w("monitoring.json", monitoring_summary())
     _route_shapes(df)
+    from . import insights
+    print("insights:", insights.build_all(df, _w))
 
 
 def monitoring_summary():
