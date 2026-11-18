@@ -16,6 +16,20 @@ Real screenshots of the live site.
 |---|---|
 | ![Live map with a bus card open](docs/img/app-home.jpg) | <img src="docs/img/app-phone.png" width="260" alt="Phone view with a bus card"> |
 
+**Replay a whole day:** every bus that drove, and every ghost bus drifting along the route it was timetabled to drive, at the times it should have driven it. A day plays in about a minute.
+
+![Replay of a day of Sheffield's buses, with ghost buses on their routes](docs/img/app-replay.jpg)
+
+**Weekly ghost report:** this week against last week, the worst and most improved routes, every operator, the "ghost of the week", and a weekday × hour heatmap of when buses go missing. One button makes a shareable image:
+
+| Report and heatmap | The share image |
+|---|---|
+| ![Weekly report with the weekday by hour heatmap](docs/img/app-report.jpg) | ![Weekly report share card](docs/img/report-card.jpg) |
+
+**Departure board for a screen:** a full-screen live board for any stop, for a TV in a café, library or student union.
+
+![Live departure board for Arundel Gate](docs/img/app-board.jpg)
+
 **Journey planner:** fastest, most reliable, least walking and fewest changes, each with the reason it was picked and how likely it is to work out. Drag the slider to leave later.
 
 ![Journey planner](docs/img/app-plan.jpg)
