@@ -28,6 +28,8 @@ Real screenshots of the live site.
 
 **Where buses vanish:** every stop on the map, sized by how often the buses due there never came. Every stop page shows its own record, and any record can be shared as an image.
 
+![Hotspots map of where buses vanish](docs/img/app-hotspots.jpg)
+
 **Departure board for a screen:** a full-screen live board for any stop, for a TV in a café, library or student union.
 
 ![Live departure board for Arundel Gate](docs/img/app-board.jpg)
