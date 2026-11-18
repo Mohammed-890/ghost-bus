@@ -604,11 +604,12 @@ button.gcard:hover { border-color: var(--brand); transform: translateY(-2px); }
 .rp-hours i { flex: 1; background: var(--brand); opacity: .35; border-radius: 2px 2px 0 0; min-height: 2px; }
 .rp-hours i.now { opacity: 1; }
 .rp-feed { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; }
-.rp-feed li { display: flex; gap: .6rem; align-items: center; padding: .45rem .6rem; border-radius: 10px; background: var(--brand-soft); animation: rp-in .35s ease-out; }
+.rp-feed li { display: flex; gap: .6rem; align-items: center; padding: .45rem .6rem; border-radius: 10px; background: var(--brand-soft); }
+.rp-feed li.new { animation: rp-in .35s ease-out; }
 .rp-feed li span:last-child { display: flex; flex-direction: column; line-height: 1.25; }
 .rp-feed li small { color: var(--muted); }
 @keyframes rp-in { from { transform: translateY(-6px); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .rp-feed li { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .rp-feed li.new { animation: none; } }
 
 /* ---------------------------------------------------------------- heatmap */
 .heat { display: grid; gap: 2px; align-items: center; font-size: .72rem; }

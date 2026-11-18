@@ -1612,8 +1612,8 @@ function rpUpdateHud(on, started) {
   if (started !== rp.shown) {
     rp.shown = started;
     const box = document.getElementById("rp-feed");
-    if (box) box.replaceChildren(...RP.ghosts.slice(Math.max(0, started - 5), started).reverse().map((g) =>
-      el("li", {}, el("span", { class: "rt" }, g.route), el("span", {}, el("b", {}, `${g.time} never came`), el("small", {}, `${shortStop(g.from)} to ${shortStop(g.to)} · ${g.op}`)))));
+    if (box) box.replaceChildren(...RP.ghosts.slice(Math.max(0, started - 5), started).reverse().map((g, k) =>
+      el("li", { class: k === 0 && rp.playing ? "new" : null }, el("span", { class: "rt" }, g.route), el("span", {}, el("b", {}, `${g.time} never came`), el("small", {}, `${shortStop(g.from)} to ${shortStop(g.to)} · ${g.op}`)))));
     if (box && !started) box.replaceChildren(el("li", { class: "muted" }, "No ghost buses yet. Press play."));
   }
 }
