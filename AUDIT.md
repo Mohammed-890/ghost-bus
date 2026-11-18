@@ -140,6 +140,16 @@ Ranked by passenger value, then feasibility, competitive edge, cost and commerci
 
 Checked: 41 Python tests pass (3 new for the builders). The 147-question assistant regression gives the same intents. The browser QA suite passes with no console errors, and the new views were checked at desktop and phone widths.
 
+## 9. Built in round four
+
+1. **Where buses vanish** (`#/hotspots`). Every stop in Sheffield on the map, sized and coloured by how often the buses due there never came, for all days or the last 7. A ghost bus counts at every stop it was timetabled to serve (full stop lists from the timetable). Lists the worst records and the stops that lose the most buses. Data: `stops.json` from `insights.build_stops`.
+2. **A track record on every stop page.** "1 in 23 buses due here never came, 797 of 18,245 checked since 1 Nov, worse than 55% of Sheffield's stops", with the last 7 days beside it.
+3. **Share any record as an image.** The weekly report, any route's History tab and any stop page make a 1200×630 card with the real numbers, ready for a group chat or a councillor's inbox.
+4. **Lateness heat** (Layers → Lateness heat). Colours the live map by how late the buses in each area are running right now (middle value of at least 2 buses).
+5. **The operator race** on the report. Each operator's 3-day ghost rate, replayed day by day as an animated bar race.
+
+Checked: 42 Python tests pass, the 147-question regression gives the same intents, and the browser QA passes with no console errors at desktop and phone widths.
+
 ### Still needs hosting or external access
 
 | Feature | What's missing |
