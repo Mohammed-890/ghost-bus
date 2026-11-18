@@ -16,6 +16,10 @@ Real screenshots of the live site.
 |---|---|
 | ![Live map with a bus card open](docs/img/app-home.jpg) | <img src="docs/img/app-phone.png" width="260" alt="Phone view with a bus card"> |
 
+**Ghost City:** Sheffield at night in 3D. Neon routes coloured by how often their buses vanish, a tower at every stop as tall as its ghost count, and a whole day replayed on top, with glowing ghosts floating along the routes they never drove. Turn the sound on to hear them.
+
+![Ghost City, Sheffield's buses in 3D](docs/img/app-city.jpg)
+
 **Replay a whole day:** every bus that drove, and every ghost bus drifting along the route it was timetabled to drive, at the times it should have driven it. A day plays in about a minute.
 
 ![Replay of a day of Sheffield's buses, with ghost buses on their routes](docs/img/app-replay.jpg)

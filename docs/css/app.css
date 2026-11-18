@@ -751,3 +751,46 @@ body.story-on .chat-open { display: none; }
 .st-nav { position: absolute; top: 0; bottom: 0; width: 30%; background: none; border: 0; cursor: pointer; z-index: 0; }
 .st-nav.prev { left: 0; } .st-nav.next { right: 0; width: 70%; }
 @media (prefers-reduced-motion: reduce) { .st-body, .st-ghost, .st-bars i.on b { animation: none; } .st-bars i.on b { width: 100%; } }
+
+/* ---------------------------------------------------------------- round six: Ghost City */
+.feat.city3d { grid-column: 1 / -1; background: radial-gradient(120% 140% at 85% 0%, #ff4fa3 0%, #5B3FC4 38%, #0a0620 80%); min-height: 6.2rem; align-items: center; }
+.feat.city3d .feat-ico { font-size: 1.4rem; background: rgba(255,255,255,.18); }
+.feat.city3d b { font-size: 1.15rem; }
+body.city-on .app, body.city-on .chat-open { display: none; }
+.city { position: fixed; inset: 0; z-index: 3400; background: #05030f; color: #efeaff; overflow: hidden; }
+.city-gl { position: absolute; inset: 0; }
+.city-gl canvas { display: block; touch-action: none; cursor: grab; }
+.city-top { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: flex-start; padding: 18px 22px; pointer-events: none;
+  background: linear-gradient(#05030fcc, #05030f00); }
+.city-top small { color: #ff7ab8; font-weight: 700; letter-spacing: .02em; }
+.city-top h1 { margin: 2px 0 2px; font-size: clamp(1.3rem, 3.2vw, 2.2rem); line-height: 1.1; text-shadow: 0 0 18px #a855f788; }
+.city-top p { margin: 0; color: #b9b0dc; font-size: .9rem; }
+.city-x { pointer-events: auto; color: #efeaff; text-decoration: none; font-size: 1.6rem; padding: 2px 8px; }
+.city-key { position: absolute; top: 108px; left: 22px; display: flex; flex-direction: column; gap: 5px; font-size: .78rem; color: #b9b0dc; pointer-events: none; }
+.city-key i { display: inline-block; width: 12px; height: 12px; margin-right: 7px; vertical-align: -1px; border-radius: 50%; }
+.city-key .k-bus { background: #ffc43d; box-shadow: 0 0 8px #ffc43d; }
+.city-key .k-ghost { background: #f3edff; box-shadow: 0 0 8px #ff4fa3; border-radius: 50% 50% 3px 3px; }
+.city-key .k-line { width: 18px; height: 3px; border-radius: 2px; background: linear-gradient(90deg, #2BE4C8, #ff4fa3, #a855f7); vertical-align: 3px; }
+.city-key .k-tower { width: 5px; height: 14px; border-radius: 1px; background: linear-gradient(#a855f7, #ff4fa3); margin-left: 3px; margin-right: 11px; }
+.city-bar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); width: min(720px, calc(100% - 32px)); padding: 12px 16px 10px; border-radius: 18px;
+  background: rgba(16, 10, 38, .72); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(168, 85, 247, .35); }
+.city-now { display: flex; align-items: flex-end; gap: 1.4rem; }
+.city-clock { font-size: 2.4rem; line-height: 1; font-variant-numeric: tabular-nums; text-shadow: 0 0 16px #ffc43d66; }
+.city-now span { display: flex; flex-direction: column; line-height: 1.1; }
+.city-now span b { font-size: 1.3rem; }
+.city-now span b.g { color: #ff7ab8; }
+.city-now small { color: #b9b0dc; font-size: .75rem; }
+.city-ctl { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-top: .55rem; }
+.city .chip { background: #efeaff; color: #1b0b3a; border-color: transparent; }
+.city .chip.quiet { background: rgba(255,255,255,.1); color: #efeaff; border-color: rgba(255,255,255,.25); }
+.city .seg { background: rgba(255,255,255,.08); }
+.city .seg button { color: #efeaff; }
+.city .seg button.on { background: #efeaff; color: #1b0b3a; }
+.city .rp-range { accent-color: #ff4fa3; margin: .6rem 0 .1rem; }
+.city-hint { margin: 0; font-size: .74rem; color: #8f86b8; }
+.city-tip { position: fixed; z-index: 3; pointer-events: none; padding: 8px 11px; border-radius: 10px; background: rgba(16,10,38,.92); border: 1px solid #a855f7; display: flex; flex-direction: column; max-width: 280px; font-size: .85rem; }
+.city-tip small { color: #b9b0dc; }
+.city-loading { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: .6rem; }
+.ghost-spin { font-size: 3.4rem; animation: st-float 2.4s ease-in-out infinite; }
+@media (max-width: 640px) { .city-key { display: none; } .city-clock { font-size: 1.9rem; } .city-bar { bottom: 10px; padding: 10px 12px 8px; } }
+.city-tip[hidden] { display: none; }

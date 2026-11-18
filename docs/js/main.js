@@ -7,7 +7,7 @@
 //   summary.json, routes.json, routes/<id>.json, recent_ghosts.json, shapes.json, model.json, monitoring.json
 // The two live files come from the `live` branch (updated every ~2 minutes); the copies on the site
 // (updated every ~13 minutes) are the fallback.
-import { createAssistant } from "./assistant.js?v=17";
+import { createAssistant } from "./assistant.js?v=18";
 
 const qs = new URLSearchParams(location.search);
 const DATA = qs.get("data") || "data";
@@ -877,6 +877,8 @@ VIEWS.home = () => {
   if (map && !current.fitted) { fit(V.v.map((v) => [v[0], v[1]]), 12.5); current.fitted = true; }
   if (!WK) get("weekly.json").then((w) => { if (w) { WK = w; if (parseHash().kind === "home") render(); } });
   const feats = el("div", { class: "feats" },
+    el("a", { class: "feat city3d", href: "#/city" }, el("span", { class: "feat-ico", "aria-hidden": "true" }, "✦"),
+      el("span", {}, el("b", {}, "Ghost City in 3D"), el("small", {}, "Sheffield at night: neon routes, towers where buses vanish, and a day of ghosts floating over it. Turn the sound on."))),
     el("a", { class: "feat replay", href: "#/replay" }, el("span", { class: "feat-ico", "aria-hidden": "true" }, "▶"),
       el("span", {}, el("b", {}, "Replay a whole day"), el("small", {}, "Every bus in a minute, and every ghost drifting along the route it never drove."))),
     el("a", { class: "feat hot", href: "#/hotspots" }, el("span", { class: "feat-ico", "aria-hidden": "true" }, "◉"),
@@ -1621,6 +1623,7 @@ function rpUpdateHud(on, started) {
   if (play) { const want = rp.playing ? "❚❚ Pause" : rp.t >= RP_END - 1 ? "↺ Replay" : "▶ Play"; if (play.textContent !== want) play.textContent = want; }
   const h = Math.floor(rp.t / 3600);
   document.querySelectorAll("#rp-hours i").forEach((b) => b.classList.toggle("now", +b.dataset.h === h));
+  if (SND?.on) { SND.level(on / Math.max(1, RP.buses.length * 0.7)); if (rp.playing && started > rp.shown && rp.shown >= 0 && started - rp.shown < 6) for (let k = rp.shown; k < started; k++) SND.ghost((k * 0.618) % 1); }
   if (started !== rp.shown) {
     rp.shown = started;
     const box = document.getElementById("rp-feed");
@@ -1671,6 +1674,7 @@ VIEWS.replay = () => {
           el("span", { class: "g" }, el("b", { id: "rp-gone" }, "0"), el("small", {}, "never came")))),
       el("div", { class: "rp-controls" },
         el("button", { type: "button", class: "chip", id: "rp-play", onclick: () => { if (rp.t >= RP_END - 1) rp.t = RP_START; rp.playing = !rp.playing; drawReplay(); } }, "▶ Play"),
+        soundButton(),
         el("div", { class: "seg small", role: "group", "aria-label": "Speed" }, speeds.map(([v, w]) =>
           el("button", { type: "button", class: rp.speed === v ? "on" : "", "aria-pressed": String(rp.speed === v), onclick: (e) => { rp.speed = v; e.target.parentElement.querySelectorAll("button").forEach((b) => { b.classList.toggle("on", b === e.target); b.setAttribute("aria-pressed", String(b === e.target)); }); } }, w)))),
       el("input", { type: "range", id: "rp-range", class: "rp-range", min: RP_START, max: RP_END, step: 60, value: Math.round(rp.t), "aria-label": "Time of day",
@@ -1681,7 +1685,7 @@ VIEWS.replay = () => {
       section("Just went missing", el("ul", { class: "rp-feed", id: "rp-feed" })),
       el("p", { class: "muted small" }, `Yellow dots are the ${num(d.totals.vehicles)} buses that sent their GPS that day, with a short trail behind them. `,
         `Each ghost is one of the ${num(d.totals.ghosts)} timetabled buses that never turned up (of ${num(d.totals.judged)} checked), moving along the route it should have driven, at the times it should have driven it.`),
-      el("div", { class: "chips" }, el("a", { class: "chip quiet", href: "#/report" }, "This week’s ghost report"), el("a", { class: "chip quiet", href: "#/reliability" }, "Every route’s record")));
+      el("div", { class: "chips" }, el("a", { class: "chip", href: "#/city" }, "✦ See it in 3D: Ghost City"), el("a", { class: "chip quiet", href: "#/report" }, "This week’s ghost report"), el("a", { class: "chip quiet", href: "#/reliability" }, "Every route’s record")));
     rp.shown = -1; drawReplay();
   });
   return [el("div", { class: "head" }, el("p", { class: "kicker" }, "Replay"), el("h2", {}, "A whole day of Sheffield’s buses in a minute"),
@@ -2126,6 +2130,76 @@ function embedButton(key, label) {
   return b;
 }
 
+// ---------------------------------------------------------------- sound for the replays
+let SND = null;
+async function sound() { if (!SND) { const m = await import("./sound.js?v=18"); SND = m.createSound(); } return SND; }
+function soundButton() {
+  const b = el("button", { type: "button", class: "chip quiet", "aria-pressed": String(!!SND?.on), onclick: async () => {
+    const s = await sound();
+    if (s.on) s.stop(); else { s.start(); s.ghost(0.3); }
+    b.setAttribute("aria-pressed", String(s.on)); b.textContent = s.on ? "🔊 Sound on" : "🔈 Sound";
+  } }, SND?.on ? "🔊 Sound on" : "🔈 Sound");
+  return b;
+}
+
+// ---------------------------------------------------------------- Ghost City, in 3D
+let CITY = null;
+function closeCity() { CITY?.dispose(); CITY = null; $("#city")?.remove(); document.body.classList.remove("city-on"); }
+VIEWS.city = () => {
+  if (CITY && $("#city")) return [el("h2", { class: "vh" }, "Ghost City")];
+  closeCity();
+  document.body.classList.add("city-on");
+  const host = el("div", { class: "city-gl" });
+  const tip = el("div", { class: "city-tip", hidden: true });
+  const clock = el("b", { class: "city-clock" }, "05:30"), on = el("b", {}, "0"), gone = el("b", { class: "g" }, "0");
+  const play = el("button", { type: "button", class: "chip", onclick: () => { if (!CITY) return; CITY.state.playing = !CITY.state.playing; play.textContent = CITY.state.playing ? "❚❚ Pause" : "▶ Play"; } }, "❚❚ Pause");
+  const speeds = el("div", { class: "seg small", role: "group", "aria-label": "Speed" }, [[300, "Slow"], [1200, "Normal"], [3600, "Fast"]].map(([v, w]) =>
+    el("button", { type: "button", class: v === 1200 ? "on" : "", onclick: (e) => { if (CITY) CITY.state.speed = v; speeds.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === e.target)); } }, w)));
+  const range = el("input", { type: "range", class: "rp-range", min: 4.5 * 3600, max: 24 * 3600, step: 60, value: 5.5 * 3600, "aria-label": "Time of day", oninput: (e) => { if (CITY) CITY.state.t = +e.target.value; } });
+  const loading = el("div", { class: "city-loading" }, el("span", { class: "ghost-spin", "aria-hidden": "true" }, "👻"), el("p", {}, "Building Ghost City…"));
+  const shell = el("div", { id: "city", class: "city", role: "dialog", "aria-label": "Ghost City, Sheffield in 3D" }, host, loading, tip,
+    el("div", { class: "city-top" },
+      el("div", {}, el("small", {}, "Ghost City"), el("h1", {}, "Sheffield’s buses, in 3D"), el("p", { id: "city-day" }, "")),
+      el("a", { class: "city-x", href: "#/", "aria-label": "Close Ghost City" }, "✕")),
+    el("div", { class: "city-key" }, el("span", {}, el("i", { class: "k-bus" }), "bus on the road"), el("span", {}, el("i", { class: "k-ghost" }), "bus that never came"),
+      el("span", {}, el("i", { class: "k-line" }), "route: teal reliable, pink to violet missing more"), el("span", {}, el("i", { class: "k-tower" }), "tower: buses that never came at that stop")),
+    el("div", { class: "city-bar" },
+      el("div", { class: "city-now" }, clock, el("span", {}, on, el("small", {}, "on the road")), el("span", {}, gone, el("small", {}, "never came"))),
+      el("div", { class: "city-ctl" }, play, speeds, soundButton()), range,
+      el("p", { class: "city-hint" }, "Drag to turn, scroll or pinch to zoom. Tap a ghost or a tower.")));
+  document.body.append(shell);
+  let lastGone = 0;
+  Promise.all([loadReplay(), get("shapes.json"), loadStops(), import("./city.js?v=18")]).then(([rpd, shapes, st, mod]) => {
+    if (parseHash().kind !== "city" || !shell.isConnected) return;
+    if (!rpd) { loading.replaceChildren(el("p", {}, "The replay isn’t ready yet. Come back tomorrow morning.")); return; }
+    $("#city-day").textContent = `${new Date(`${rpd.day}T12:00:00`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })} · ${num(rpd.totals.vehicles)} buses, ${num(rpd.totals.ghosts)} ghosts`;
+    const rates = new Map((R || []).filter((r) => r.judged >= 30).map((r) => [r.id, r.rate]));
+    try {
+      CITY = mod.mountCity(host, {
+        replay: rpd, posAt, shapes: shapes || [], routeRates: rates, stops: st?.rows || [],
+        onTick: (t, n, g, total) => {
+          clock.textContent = hhmm(Math.round(t)); on.textContent = num(n); gone.textContent = num(g);
+          if (document.activeElement !== range) range.value = String(Math.round(t));
+          if (SND?.on) { SND.level(n / Math.max(1, total * 0.7)); if (g > lastGone && g - lastGone < 6) for (let k = lastGone; k < g; k++) SND.ghost((k * 0.618) % 1); }
+          lastGone = g;
+        },
+        onHover: (h, x, y) => {
+          if (!h) { tip.hidden = true; return; }
+          tip.hidden = false; tip.style.left = `${x + 14}px`; tip.style.top = `${y + 14}px`;
+          tip.replaceChildren(...(h.kind === "ghost"
+            ? [el("b", {}, `Route ${h.g.route}, ${h.g.time}`), el("span", {}, `${shortStop(h.g.from)} to ${shortStop(h.g.to)}`), el("small", {}, `${h.g.op} · never came`)]
+            : [el("b", {}, h.s.name), el("span", {}, `${pct(h.s.g / h.s.n)} of buses due here never came`), el("small", {}, `${num(h.s.g)} of ${num(h.s.n)} since ${dm(st.from)}`)]));
+        },
+        onPick: (h) => { if (h.kind === "stop") { CITY.fly(h.s.lat, h.s.lon); } else location.hash = href("route", slug(`${h.g.route}-${h.g.op}`)) + "/history"; },
+      });
+      loading.remove();
+    } catch (e) {
+      loading.replaceChildren(el("p", {}, "Your browser couldn’t start 3D graphics (WebGL). The 2D replay works everywhere."), el("a", { class: "chip", href: "#/replay" }, "Open the replay"));
+    }
+  });
+  return [el("h2", { class: "vh" }, "Ghost City")];
+};
+
 // ---------------------------------------------------------------- router
 function parseHash() {
   const [, kind = "home", key = "", sub = "", extra = ""] = (location.hash.replace(/^#\/?/, "#/").match(/^#\/([^/]*)\/?([^/]*)\/?([^/]*)\/?([^/]*)/) || []);
@@ -2141,6 +2215,7 @@ function render(reset) {
   document.body.classList.toggle("tv-on", h.kind === "board");
   if (h.kind !== "board") { $("#tv")?.remove(); clearInterval(tvTimer); }
   if (h.kind !== "story") { $("#story")?.remove(); clearTimeout(storyTimer); }
+  if (h.kind !== "city") closeCity();
   document.body.classList.toggle("story-on", h.kind === "story");
   if (!same) current = { ...h, fitted: false, filter: h.kind === current.kind && h.key === current.key ? current.filter : null };
   const fn = VIEWS[h.kind] || VIEWS.home;
