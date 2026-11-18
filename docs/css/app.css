@@ -766,7 +766,7 @@ body.city-on .app, body.city-on .chat-open { display: none; }
 .city-top h1 { margin: 2px 0 2px; font-size: clamp(1.3rem, 3.2vw, 2.2rem); line-height: 1.1; text-shadow: 0 0 18px #a855f788; }
 .city-top p { margin: 0; color: #b9b0dc; font-size: .9rem; }
 .city-x { pointer-events: auto; color: #efeaff; text-decoration: none; font-size: 1.6rem; padding: 2px 8px; }
-.city-key { position: absolute; top: 108px; left: 22px; display: flex; flex-direction: column; gap: 5px; font-size: .78rem; color: #b9b0dc; pointer-events: none; }
+.city-key { position: absolute; top: 18px; right: 70px; text-align: left; display: flex; flex-direction: column; gap: 5px; font-size: .78rem; color: #b9b0dc; pointer-events: none; }
 .city-key i { display: inline-block; width: 12px; height: 12px; margin-right: 7px; vertical-align: -1px; border-radius: 50%; }
 .city-key .k-bus { background: #ffc43d; box-shadow: 0 0 8px #ffc43d; }
 .city-key .k-ghost { background: #f3edff; box-shadow: 0 0 8px #ff4fa3; border-radius: 50% 50% 3px 3px; }
@@ -794,3 +794,12 @@ body.city-on .app, body.city-on .chat-open { display: none; }
 .ghost-spin { font-size: 3.4rem; animation: st-float 2.4s ease-in-out infinite; }
 @media (max-width: 640px) { .city-key { display: none; } .city-clock { font-size: 1.9rem; } .city-bar { bottom: 10px; padding: 10px 12px 8px; } }
 .city-tip[hidden] { display: none; }
+.city-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.city-lab { position: absolute; left: 0; top: 0; white-space: nowrap; will-change: transform; }
+.city-lab.place { font-size: .78rem; font-weight: 700; letter-spacing: .04em; color: #d9d2ff; text-shadow: 0 0 6px #000, 0 0 2px #000; }
+.city-lab.hot { display: flex; align-items: baseline; gap: .35rem; padding: 3px 8px; border-radius: 8px; background: rgba(20, 8, 40, .82); border: 1px solid #ff4fa3; font-size: .78rem; color: #efeaff; box-shadow: 0 0 12px #ff4fa355; }
+.city-lab.hot b { color: #ff7ab8; font-size: .9rem; }
+.city-key .k-glow { background: radial-gradient(#ff4fa3, #ff4fa300 70%); width: 14px; height: 14px; }
+@media (max-width: 640px) { .city-lab.place { font-size: .68rem; } .city-lab.hot { font-size: .68rem; } .city-lab.hot span { display: none; } }
+.city-lab.hot.minor { opacity: .7; } .city-lab.hot.minor span { display: none; }
+@media (max-width: 1000px) { .city-key { display: none; } }
