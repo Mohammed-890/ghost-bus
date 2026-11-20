@@ -8,3 +8,4 @@
 {"n": 4338, "brier": 0.05289, "ghost_rate": 0.0588, "predicted_ghost_rate": 0.0715, "model_version": "5", "day": "2026-11-16"}
 {"n": 4324, "brier": 0.07341, "ghost_rate": 0.0851, "predicted_ghost_rate": 0.0762, "model_version": "5", "day": "2026-11-17"}
 {"n": 4342, "brier": 0.05468, "ghost_rate": 0.0636, "predicted_ghost_rate": 0.0752, "model_version": "5", "day": "2026-11-18"}
+{"n": 4344, "brier": 0.06171, "ghost_rate": 0.0741, "predicted_ghost_rate": 0.0819, "model_version": "5", "day": "2026-11-19"}
