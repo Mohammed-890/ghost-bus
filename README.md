@@ -16,36 +16,6 @@ Real screenshots of the live site.
 |---|---|
 | ![Live map with a bus card open](docs/img/app-home.jpg) | <img src="docs/img/app-phone.png" width="260" alt="Phone view with a bus card"> |
 
-**Ghost City:** Sheffield at night in 3D. Neon routes coloured by how often their buses vanish, a tower at every stop as tall as its ghost count, and a whole day replayed on top, with glowing ghosts floating along the routes they never drove. Turn the sound on to hear them.
-
-![Ghost City, Sheffield's buses in 3D](docs/img/app-city.jpg)
-
-**Replay a whole day:** every bus that drove, and every ghost bus drifting along the route it was timetabled to drive, at the times it should have driven it. A day plays in about a minute.
-
-![Replay of a day of Sheffield's buses, with ghost buses on their routes](docs/img/app-replay.jpg)
-
-**Weekly ghost report:** this week against last week, the worst and most improved routes, every operator, the "ghost of the week", and a weekday × hour heatmap of when buses go missing. One button makes a shareable image:
-
-| Report and heatmap | The share image |
-|---|---|
-| ![Weekly report with the weekday by hour heatmap](docs/img/app-report.jpg) | ![Weekly report share card](docs/img/report-card.jpg) |
-
-**Where buses vanish:** every stop on the map, sized by how often the buses due there never came. Every stop page shows its own record, and any record can be shared as an image.
-
-![Hotspots map of where buses vanish](docs/img/app-hotspots.jpg)
-
-**Ghost forecast:** the live model's forecast for every departure today, told like the weather, with its own track record against what really happened. When a bus does vanish, the next one on that route comes a median of 32 minutes later.
-
-| Forecast | Story mode: the numbers in 60 seconds |
-|---|---|
-| ![Ghost forecast](docs/img/app-forecast.jpg) | ![Story mode](docs/img/app-story.jpg) |
-
-**Open data and an embeddable widget:** every file is free to reuse (`#/data`), and any stop's live times can go on another website with one copied snippet (`embed.html?stop=…`).
-
-**Departure board for a screen:** a full-screen live board for any stop, for a TV in a café, library or student union.
-
-![Live departure board for Arundel Gate](docs/img/app-board.jpg)
-
 **Journey planner:** fastest, most reliable, least walking and fewest changes, each with the reason it was picked and how likely it is to work out. Drag the slider to leave later.
 
 ![Journey planner](docs/img/app-plan.jpg)
@@ -54,9 +24,6 @@ Real screenshots of the live site.
 
 ![Reliability dashboard](docs/img/app-reliability.jpg)
 
-**Spot the ghost:** a quick game with the real records. Which route lets Sheffield down more?
-
-![Spot the ghost game](docs/img/app-game.jpg)
 
 ## How it works
 

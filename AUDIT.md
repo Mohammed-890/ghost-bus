@@ -167,6 +167,12 @@ Checked: 43 Python tests pass, the 147-question regression gives the same intent
 
 Checked: 43 Python tests, the 147-question regression, the browser QA and the new-feature checks all pass with no console errors. Ghost City was rendered in headless Chromium (software WebGL) at desktop and phone sizes.
 
+## 12. Simplified (November 2026)
+
+The site had grown too many side features, and they got in the way of the one question it answers: is my bus actually coming? These were removed, with their code and the daily data they needed: the 3D Ghost City and its sound, the day replay, story mode, the ghost forecast page, the weekly report and its share images, the hotspots map, the weekday × hour heatmaps, the screen departure board, the embeddable widget, the open-data page, the lateness heat layer, the operator race, the accuracy tab and the game.
+
+What's left: the live map, stop and route pages with "may not come" warnings and each stop's track record, the journey planner, the reliability tables, saved stops and journeys, and the assistant. Navigation is Live, Plan, Reliability, You and About. The pipeline now only adds `stops.json` on top of the core files.
+
 ### Still needs hosting or external access
 
 | Feature | What's missing |
