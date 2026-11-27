@@ -165,6 +165,6 @@
     "promoted": true,
     "reason": "challenger Brier 0.05667 vs champion 0.05691 on the same days"
   },
-  "status": "champion",
-  "reason": ""
+  "status": "retired",
+  "reason": "replaced by v17"
 }
